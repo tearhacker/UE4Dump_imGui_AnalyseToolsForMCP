@@ -1,0 +1,55 @@
+// 创作者: 曦曦(DreamFekk) https://github.com/DreamFekk
+// 禁止圈钱盗卖
+
+e_machine: 0xB7
+Library: /data/app/~~ZZX1YHw4GTmsToAnswW-pg==/com.tencent.letsgo--MeE1ySKhnDd9si-YKLL9Q==/lib/arm64/libUE4.so
+BaseAddress: 0x72AD908000
+72ad908000-72b1efb000 r--p 0 fe:48 955566 /data/app/~~ZZX1YHw4GTmsToAnswW-pg==/com.tencent.letsgo--MeE1ySKhnDd9si-YKLL9Q==/lib/arm64/libUE4.so
+72b1efb000-72bc9ee000 r-xp 45f3000 fe:48 955566 /data/app/~~ZZX1YHw4GTmsToAnswW-pg==/com.tencent.letsgo--MeE1ySKhnDd9si-YKLL9Q==/lib/arm64/libUE4.so
+72bc9ee000-72bed85000 r--p f0e6000 fe:48 955566 /data/app/~~ZZX1YHw4GTmsToAnswW-pg==/com.tencent.letsgo--MeE1ySKhnDd9si-YKLL9Q==/lib/arm64/libUE4.so
+72bed85000-72bee64000 rw-p 1147d000 fe:48 955566 /data/app/~~ZZX1YHw4GTmsToAnswW-pg==/com.tencent.letsgo--MeE1ySKhnDd9si-YKLL9Q==/lib/arm64/libUE4.so
+72bee64000-72bf99a000 rw-p 0 00:00 0 [anon:.bss]
+==========================
+FNamePool: [<Base> + 0x11E34100] = 0x72BF73C100
+Test dumping first 5 name entries
+GetNameByID(0): None
+GetNameByID(1): neByteProperty�IntProperty
+GetNameByID(2): ByteProperty�IntProperty
+GetNameByID(3): ByteProperty
+GetNameByID(4): teProperty�IntProperty
+==========================
+GUObjectArray: [<Base> + 0x11E4F210] = 0x72BF757210
+ObjObjects: [<Base> + 0x11E4F220] = 0x72BF757220
+ObjObjects Num: 458752
+Test Dumping First 5 Name Entries
+GetObjectPtr(0): CoreUObject
+GetObjectPtr(1): Object
+GetObjectPtr(2): Engine
+GetObjectPtr(3): Subsystem
+GetObjectPtr(4): GameInstance
+==========================
+Finding GEngine & GWorld...
+Class Engine.Engine -> 0x74AF785E00
+Class Engine.World -> 0x74AF5B4F80
+GEngine: [<Base> + 0x11FC6ED0] = 0x72BF8CEED0
+GWorld: [<Base> + 0x11FCAC30] = 0x72BF8D2C30
+==========================
+Matrix: [<Base> + 0x11FBDCF8] = 0x72BF8C5CF8
+Physx: [<Base> + 0x12019D98] = 0x72BF921D98
+Couldn't find refrence to FrameCount.
+StaticFindObject: [<Base> + 0xBF8557C] = 0x72B988D57C
+NativeAndroidApp: [<Base> + 0x1155BFD8] = 0x72BEE63FD8
+ProcessEvent: [<Base> + 0xBF58848] = 0x72B9860848
+ProcessEventIdx: 68
+==========================
+Gathering UObjects...
+Gathered 458752 Objects (Packages 320)
+==========================
+Saved packages: 320
+Saved classes: 10754
+Saved structs: 6186
+Saved enums: 2865
+==========================
+正在生成 script.json...
+函数数量: 48868
+==========================

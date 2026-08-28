@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "zygisk-il2cpp": {
+      "command": "D:/Program Files (x86)/python3.14.6/python.exe",
+      "args": [
+        "D:/mcp_server.py",
+        "--port",
+        "27184",
+        "--adb",
+        "D:/ASWJ/platform-tools/adb.exe"
+      ]
+    }
+  }
+}

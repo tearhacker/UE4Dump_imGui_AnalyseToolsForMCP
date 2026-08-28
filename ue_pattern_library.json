@@ -1,0 +1,2276 @@
+{
+  "generatedFrom": "AndUEDumper\\AndUEDumper\\src\\UE\\UEGameProfiles",
+  "profiles": [
+    {
+      "file": "ArenaBreakout.hpp",
+      "class": "ArenaBreakoutProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.proximabeta.mf.uamo"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "? ? ? 90 ? ? ? 52 09 01 09 0B ? ? ? 71 ? ? ? F9 ? ? ? 1A ? ? ? 13 ? ? ? 12 08 01 09 4B ? ? ? 52 ? ? ? F9 ? ? ? F8 1F 20 03 D5 08 29 29 9B ? ? ? 39 ? ? ? 37 F8 03 00 AA",
+            "step": 0
+          },
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {}
+    },
+    {
+      "file": "ArkUltimate.hpp",
+      "class": "ArkUltimateProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.studiowildcard.arkuse"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "Auroria.hpp",
+      "class": "AuroriaProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.herogame.gplay.outerland.auroria.survivalminecraft.mmorpg",
+        "com.herogame.gplay.outerland.wandereruniverse",
+        "com.xiaojiaogame.gplay.outerland.wandereruniverse"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "BabyYellow.hpp",
+      "class": "BabyYellowProfile",
+      "ueVersion": "UE5_03",
+      "appIds": [
+        "com.TeamTerrible.BabyInYellow"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "BlackClover.hpp",
+      "class": "BlackCloverProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.garena.game.bc",
+        "com.vic.bc.jp",
+        "com.vic.bc.kr"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "BladeSoul.hpp",
+      "class": "BladeSoulProfile",
+      "ueVersion": "UE4_20",
+      "appIds": [
+        "com.netmarble.bnsmasia"
+      ],
+      "patterns": {},
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "_ZN5FName16GetIsInitializedEv",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "Case2.hpp",
+      "class": "Case2Profile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.WallnutLLC.Case2"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "Century.hpp",
+      "class": "CenturyProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.Playwing.Century"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "DeltaForce.hpp",
+      "class": "DeltaForceProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.proxima.dfm",
+        "com.garena.game.df"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 14 AA ? ? ? 95 ? ? ? 36 ? ? ? B9",
+            "step": -7
+          },
+          {
+            "pattern": "91 F6 03 01 AA E1 03 14 AA ? ? ? 39",
+            "step": -7
+          },
+          {
+            "pattern": "91 E1 03 15 AA ? ? ? 95 ? ? ? 36 ? ? ? B9 ? ? ? 52 ? ? ? B0 ? ? ? F9 09 01 09 0B ? ? ? 71 ? ? ? 1A ? ? ? 13 ? ? ? 12 08 01 09 4B ? ? ? 52 ? ? ? F8 1F 20 03 D5 08 29 29 9B ? ? ? B9 ? ? ? 72 ? ? ? 54 ? ? ? F9",
+            "step": -7
+          }
+        ]
+      },
+      "symbols": {}
+    },
+    {
+      "file": "Dislyte.hpp",
+      "class": "DislyteProfile",
+      "ueVersion": "UE4_23_24",
+      "appIds": [
+        "com.lilithgames.xgame.gp"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "Farlight.hpp",
+      "class": "FarlightProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.miraclegames.farlight84"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? ? ? ? ? A8 02 ? 39",
+            "step": 24
+          },
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? A8 02 ? 39",
+            "step": 36
+          },
+          {
+            "pattern": "FD 7B 01 A9 FD 43 00 91 ? ? ? ? 89 ? ? 39 F3 03 08 AA C9 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "F8 C8 ? ? 39 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 9
+          },
+          {
+            "pattern": "02 ? 91 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 7
+          },
+          {
+            "pattern": "39 C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52 ? ? ? 39",
+            "step": 5
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52",
+            "step": 4
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97",
+            "step": 4
+          }
+        ]
+      },
+      "symbols": {}
+    },
+    {
+      "file": "HelloNeighbor.hpp",
+      "class": "HelloNeighborProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.tinybuildgames.helloneighbor"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "HelloNeighborND.hpp",
+      "class": "HelloNeighborNDProfile",
+      "ueVersion": "UE5_00_02",
+      "appIds": [
+        "com.tinybuildgames.hndiaries"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "Injustice2.hpp",
+      "class": "Injustice2Profile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.wb.goog.injustice.brawler2017"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "KingArthur.hpp",
+      "class": "KingArthurProfile",
+      "ueVersion": "UE5_00_02",
+      "appIds": [
+        "com.kabam.knights.legends"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? ? ? ? ? A8 02 ? 39",
+            "step": 24
+          },
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? A8 02 ? 39",
+            "step": 36
+          },
+          {
+            "pattern": "FD 7B 01 A9 FD 43 00 91 ? ? ? ? 89 ? ? 39 F3 03 08 AA C9 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "F8 C8 ? ? 39 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 9
+          },
+          {
+            "pattern": "02 ? 91 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 7
+          },
+          {
+            "pattern": "39 C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52 ? ? ? 39",
+            "step": 5
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52",
+            "step": 4
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97",
+            "step": 4
+          }
+        ]
+      },
+      "symbols": {}
+    },
+    {
+      "file": "Lineage2.hpp",
+      "class": "Lineage2Profile",
+      "ueVersion": "UE4_00_17",
+      "appIds": [
+        "com.netmarble.lin2ws"
+      ],
+      "patterns": {},
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "_ZN5FName16GetIsInitializedEv",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "LineageW.hpp",
+      "class": "LineageWProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.ncsoft.lineagew"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "MortalKombat.hpp",
+      "class": "MortalKombatProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.wb.goog.mkx"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "NightCrows.hpp",
+      "class": "NightCrowsProfile",
+      "ueVersion": "UE5_00_02",
+      "appIds": [
+        "com.wemade.nightcrows",
+        "com.wemade.nightcrowsglobal"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? ? ? ? ? A8 02 ? 39",
+            "step": 24
+          },
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? A8 02 ? 39",
+            "step": 36
+          },
+          {
+            "pattern": "FD 7B 01 A9 FD 43 00 91 ? ? ? ? 89 ? ? 39 F3 03 08 AA C9 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "F8 C8 ? ? 39 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 9
+          },
+          {
+            "pattern": "02 ? 91 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 7
+          },
+          {
+            "pattern": "39 C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52 ? ? ? 39",
+            "step": 5
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52",
+            "step": 4
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97",
+            "step": 4
+          }
+        ]
+      },
+      "symbols": {}
+    },
+    {
+      "file": "OdinValhalla.hpp",
+      "class": "OdinValhallaProfile",
+      "ueVersion": "UE4_23_24",
+      "appIds": [
+        "com.kakaogames.gbod"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "PES.hpp",
+      "class": "PESProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "jp.konami.pesam"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? ? ? ? ? A8 02 ? 39",
+            "step": 24
+          },
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? A8 02 ? 39",
+            "step": 36
+          },
+          {
+            "pattern": "FD 7B 01 A9 FD 43 00 91 ? ? ? ? 89 ? ? 39 F3 03 08 AA C9 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "F8 C8 ? ? 39 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 9
+          },
+          {
+            "pattern": "02 ? 91 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 7
+          },
+          {
+            "pattern": "39 C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52 ? ? ? 39",
+            "step": 5
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52",
+            "step": 4
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97",
+            "step": 4
+          }
+        ]
+      },
+      "symbols": {}
+    },
+    {
+      "file": "RealBoxing2.hpp",
+      "class": "RealBoxing2Profile",
+      "ueVersion": "UE4_23_24",
+      "appIds": [
+        "com.vividgames.realboxing2"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "RLSideswipe.hpp",
+      "class": "RLSideswipeProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.Psyonix.RL2D"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? ? ? ? ? A8 02 ? 39",
+            "step": 24
+          },
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? A8 02 ? 39",
+            "step": 36
+          },
+          {
+            "pattern": "FD 7B 01 A9 FD 43 00 91 ? ? ? ? 89 ? ? 39 F3 03 08 AA C9 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "02 ? 91 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 7
+          },
+          {
+            "pattern": "39 C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52 ? ? ? 39",
+            "step": 5
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52",
+            "step": 4
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97",
+            "step": 4
+          }
+        ]
+      },
+      "symbols": {}
+    },
+    {
+      "file": "RooftopsParkour.hpp",
+      "class": "RooftopParkourProfile",
+      "ueVersion": "UE5_03",
+      "appIds": [
+        "com.GreenGoGames.RooftopPrakourFreerun"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? ? ? ? ? A8 02 ? 39",
+            "step": 24
+          },
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? A8 02 ? 39",
+            "step": 36
+          },
+          {
+            "pattern": "FD 7B 01 A9 FD 43 00 91 ? ? ? ? 89 ? ? 39 F3 03 08 AA C9 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "F8 C8 ? ? 39 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 9
+          },
+          {
+            "pattern": "02 ? 91 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 7
+          },
+          {
+            "pattern": "39 C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52 ? ? ? 39",
+            "step": 5
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52",
+            "step": 4
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97",
+            "step": 4
+          }
+        ]
+      },
+      "symbols": {}
+    },
+    {
+      "file": "SFG2.hpp",
+      "class": "SFG2Profile",
+      "ueVersion": "UE4_22",
+      "appIds": [
+        "com.ForgeGames.SpecialForcesGroup2"
+      ],
+      "patterns": {},
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GFNameTableForDebuggerVisualizers_MT",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "Torchlight.hpp",
+      "class": "TorchlightProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.xd.TLglobal"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? ? ? ? ? A8 02 ? 39",
+            "step": 24
+          },
+          {
+            "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? A8 02 ? 39",
+            "step": 36
+          },
+          {
+            "pattern": "FD 7B 01 A9 FD 43 00 91 ? ? ? ? 89 ? ? 39 F3 03 08 AA C9 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "F8 C8 ? ? 39 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 9
+          },
+          {
+            "pattern": "02 ? 91 C8 00 00 37 ? ? ? ? ? ? ? 91",
+            "step": 7
+          },
+          {
+            "pattern": "39 C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52 ? ? ? 39",
+            "step": 5
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52",
+            "step": 4
+          },
+          {
+            "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97",
+            "step": 4
+          }
+        ]
+      },
+      "symbols": {}
+    },
+    {
+      "file": "TowerFantasy.hpp",
+      "class": "TowerFantasyProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.levelinfinite.hotta.gp"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    },
+    {
+      "file": "WutheringWaves.hpp",
+      "class": "WutheringWavesProfile",
+      "ueVersion": "UE4_25_27",
+      "appIds": [
+        "com.kurogame.wutheringwaves.global"
+      ],
+      "patterns": {
+        "GetGUObjectArrayPtr": [
+          {
+            "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+            "step": -7
+          },
+          {
+            "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+            "step": 5
+          },
+          {
+            "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+            "step": -2
+          },
+          {
+            "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+            "step": 9
+          },
+          {
+            "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+            "step": 24
+          },
+          {
+            "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+            "step": 24
+          }
+        ]
+      },
+      "symbols": {
+        "GetGUObjectArrayPtr": [
+          {
+            "symbol": "GUObjectArray",
+            "decodeAdrl": false
+          }
+        ],
+        "GetNamesPtr": [
+          {
+            "symbol": "GNameBlocksDebug",
+            "decodeAdrl": false
+          }
+        ]
+      }
+    }
+  ],
+  "statistics": [
+    {
+      "ueVersion": "UE4_23_24",
+      "games": [
+        "Dislyte",
+        "OdinValhalla",
+        "RealBoxing2"
+      ],
+      "gameCount": 3,
+      "rawPatterns": 18,
+      "dedupedPatterns": 6
+    },
+    {
+      "ueVersion": "UE4_25_27",
+      "games": [
+        "ArenaBreakout",
+        "ArkUltimate",
+        "Auroria",
+        "BlackClover",
+        "Case2",
+        "Century",
+        "DeltaForce",
+        "Farlight",
+        "HelloNeighbor",
+        "Injustice2",
+        "LineageW",
+        "MortalKombat",
+        "PES",
+        "RLSideswipe",
+        "Torchlight",
+        "TowerFantasy",
+        "WutheringWaves"
+      ],
+      "gameCount": 17,
+      "rawPatterns": 130,
+      "dedupedPatterns": 18
+    },
+    {
+      "ueVersion": "UE5_00_02",
+      "games": [
+        "HelloNeighborND",
+        "KingArthur",
+        "NightCrows"
+      ],
+      "gameCount": 3,
+      "rawPatterns": 34,
+      "dedupedPatterns": 14
+    },
+    {
+      "ueVersion": "UE5_03",
+      "games": [
+        "BabyYellow",
+        "RooftopsParkour"
+      ],
+      "gameCount": 2,
+      "rawPatterns": 20,
+      "dedupedPatterns": 14
+    }
+  ],
+  "library": {
+    "UE4_23_24": {
+      "GetGUObjectArrayPtr": [
+        {
+          "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "Dislyte",
+            "OdinValhalla",
+            "RealBoxing2"
+          ]
+        },
+        {
+          "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+          "step": -7,
+          "sources": [
+            "Dislyte",
+            "OdinValhalla",
+            "RealBoxing2"
+          ]
+        },
+        {
+          "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+          "step": 9,
+          "sources": [
+            "Dislyte",
+            "OdinValhalla",
+            "RealBoxing2"
+          ]
+        },
+        {
+          "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+          "step": -2,
+          "sources": [
+            "Dislyte",
+            "OdinValhalla",
+            "RealBoxing2"
+          ]
+        },
+        {
+          "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+          "step": 5,
+          "sources": [
+            "Dislyte",
+            "OdinValhalla",
+            "RealBoxing2"
+          ]
+        },
+        {
+          "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "Dislyte",
+            "OdinValhalla",
+            "RealBoxing2"
+          ]
+        }
+      ]
+    },
+    "UE4_25_27": {
+      "GetGUObjectArrayPtr": [
+        {
+          "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "ArenaBreakout",
+            "ArkUltimate",
+            "Auroria",
+            "BlackClover",
+            "Case2",
+            "Century",
+            "Farlight",
+            "HelloNeighbor",
+            "Injustice2",
+            "LineageW",
+            "MortalKombat",
+            "PES",
+            "RLSideswipe",
+            "Torchlight",
+            "TowerFantasy",
+            "WutheringWaves"
+          ]
+        },
+        {
+          "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+          "step": 9,
+          "sources": [
+            "ArenaBreakout",
+            "ArkUltimate",
+            "Auroria",
+            "BlackClover",
+            "Case2",
+            "Century",
+            "Farlight",
+            "HelloNeighbor",
+            "Injustice2",
+            "LineageW",
+            "MortalKombat",
+            "PES",
+            "RLSideswipe",
+            "Torchlight",
+            "TowerFantasy",
+            "WutheringWaves"
+          ]
+        },
+        {
+          "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+          "step": -2,
+          "sources": [
+            "ArenaBreakout",
+            "ArkUltimate",
+            "Auroria",
+            "BlackClover",
+            "Case2",
+            "Century",
+            "Farlight",
+            "HelloNeighbor",
+            "Injustice2",
+            "LineageW",
+            "MortalKombat",
+            "PES",
+            "RLSideswipe",
+            "Torchlight",
+            "TowerFantasy",
+            "WutheringWaves"
+          ]
+        },
+        {
+          "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+          "step": 5,
+          "sources": [
+            "ArenaBreakout",
+            "ArkUltimate",
+            "Auroria",
+            "BlackClover",
+            "Case2",
+            "Century",
+            "Farlight",
+            "HelloNeighbor",
+            "Injustice2",
+            "LineageW",
+            "MortalKombat",
+            "PES",
+            "RLSideswipe",
+            "Torchlight",
+            "TowerFantasy",
+            "WutheringWaves"
+          ]
+        },
+        {
+          "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "ArenaBreakout",
+            "ArkUltimate",
+            "Auroria",
+            "BlackClover",
+            "Case2",
+            "Century",
+            "Farlight",
+            "HelloNeighbor",
+            "Injustice2",
+            "LineageW",
+            "MortalKombat",
+            "PES",
+            "RLSideswipe",
+            "Torchlight",
+            "TowerFantasy",
+            "WutheringWaves"
+          ]
+        },
+        {
+          "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+          "step": -7,
+          "sources": [
+            "ArenaBreakout",
+            "ArkUltimate",
+            "Auroria",
+            "BlackClover",
+            "Case2",
+            "Century",
+            "HelloNeighbor",
+            "Injustice2",
+            "LineageW",
+            "MortalKombat",
+            "PES",
+            "RLSideswipe",
+            "Torchlight",
+            "TowerFantasy",
+            "WutheringWaves"
+          ]
+        },
+        {
+          "pattern": "91 E1 03 14 AA ? ? ? 95 ? ? ? 36 ? ? ? B9",
+          "step": -7,
+          "sources": [
+            "DeltaForce"
+          ]
+        },
+        {
+          "pattern": "91 E1 03 15 AA ? ? ? 95 ? ? ? 36 ? ? ? B9 ? ? ? 52 ? ? ? B0 ? ? ? F9 09 01 09 0B ? ? ? 71 ? ? ? 1A ? ? ? 13 ? ? ? 12 08 01 09 4B ? ? ? 52 ? ? ? F8 1F 20 03 D5 08 29 29 9B ? ? ? B9 ? ? ? 72 ? ? ? 54 ? ? ? F9",
+          "step": -7,
+          "sources": [
+            "DeltaForce"
+          ]
+        },
+        {
+          "pattern": "91 F6 03 01 AA E1 03 14 AA ? ? ? 39",
+          "step": -7,
+          "sources": [
+            "DeltaForce"
+          ]
+        },
+        {
+          "pattern": "? ? ? 90 ? ? ? 52 09 01 09 0B ? ? ? 71 ? ? ? F9 ? ? ? 1A ? ? ? 13 ? ? ? 12 08 01 09 4B ? ? ? 52 ? ? ? F9 ? ? ? F8 1F 20 03 D5 08 29 29 9B ? ? ? 39 ? ? ? 37 F8 03 00 AA",
+          "step": 0,
+          "sources": [
+            "ArenaBreakout"
+          ]
+        }
+      ],
+      "GetNamesPtr": [
+        {
+          "pattern": "02 ? 91 C8 00 00 37 ? ? ? ? ? ? ? 91",
+          "step": 7,
+          "sources": [
+            "Farlight",
+            "PES",
+            "RLSideswipe",
+            "Torchlight"
+          ]
+        },
+        {
+          "pattern": "39 C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52 ? ? ? 39",
+          "step": 5,
+          "sources": [
+            "Farlight",
+            "PES",
+            "RLSideswipe",
+            "Torchlight"
+          ]
+        },
+        {
+          "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97",
+          "step": 4,
+          "sources": [
+            "Farlight",
+            "PES",
+            "RLSideswipe",
+            "Torchlight"
+          ]
+        },
+        {
+          "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52",
+          "step": 4,
+          "sources": [
+            "Farlight",
+            "PES",
+            "RLSideswipe",
+            "Torchlight"
+          ]
+        },
+        {
+          "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? ? ? ? ? A8 02 ? 39",
+          "step": 24,
+          "sources": [
+            "Farlight",
+            "PES",
+            "RLSideswipe",
+            "Torchlight"
+          ]
+        },
+        {
+          "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? A8 02 ? 39",
+          "step": 36,
+          "sources": [
+            "Farlight",
+            "PES",
+            "RLSideswipe",
+            "Torchlight"
+          ]
+        },
+        {
+          "pattern": "FD 7B 01 A9 FD 43 00 91 ? ? ? ? 89 ? ? 39 F3 03 08 AA C9 00 00 37 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "Farlight",
+            "PES",
+            "RLSideswipe",
+            "Torchlight"
+          ]
+        },
+        {
+          "pattern": "F8 C8 ? ? 39 C8 00 00 37 ? ? ? ? ? ? ? 91",
+          "step": 9,
+          "sources": [
+            "Farlight",
+            "PES",
+            "Torchlight"
+          ]
+        }
+      ]
+    },
+    "UE5_00_02": {
+      "GetGUObjectArrayPtr": [
+        {
+          "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "HelloNeighborND",
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+          "step": -7,
+          "sources": [
+            "HelloNeighborND",
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+          "step": 9,
+          "sources": [
+            "HelloNeighborND",
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+          "step": -2,
+          "sources": [
+            "HelloNeighborND",
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+          "step": 5,
+          "sources": [
+            "HelloNeighborND",
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "HelloNeighborND",
+            "KingArthur",
+            "NightCrows"
+          ]
+        }
+      ],
+      "GetNamesPtr": [
+        {
+          "pattern": "02 ? 91 C8 00 00 37 ? ? ? ? ? ? ? 91",
+          "step": 7,
+          "sources": [
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "39 C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52 ? ? ? 39",
+          "step": 5,
+          "sources": [
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97",
+          "step": 4,
+          "sources": [
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52",
+          "step": 4,
+          "sources": [
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? ? ? ? ? A8 02 ? 39",
+          "step": 24,
+          "sources": [
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? A8 02 ? 39",
+          "step": 36,
+          "sources": [
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "F8 C8 ? ? 39 C8 00 00 37 ? ? ? ? ? ? ? 91",
+          "step": 9,
+          "sources": [
+            "KingArthur",
+            "NightCrows"
+          ]
+        },
+        {
+          "pattern": "FD 7B 01 A9 FD 43 00 91 ? ? ? ? 89 ? ? 39 F3 03 08 AA C9 00 00 37 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "KingArthur",
+            "NightCrows"
+          ]
+        }
+      ]
+    },
+    "UE5_03": {
+      "GetGUObjectArrayPtr": [
+        {
+          "pattern": "69 3E 40 B9 1F 01 09 6B ? ? ? 54 E1 03 13 AA ? ? ? ? F4 4F ? A9 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "BabyYellow",
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "91 E1 03 ? AA E0 03 08 AA E2 03 1F 2A",
+          "step": -7,
+          "sources": [
+            "BabyYellow",
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "96 DF 02 17 ? ? ? ? 54 ? ? ? ? ? ? ? 91 E1 03 13 AA",
+          "step": 9,
+          "sources": [
+            "BabyYellow",
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "9F E5 00 ? 00 E3 FF ? 40 E3 ? ? A0 E1",
+          "step": -2,
+          "sources": [
+            "BabyYellow",
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "B4 21 0C 40 B9 ? ? ? ? ? ? ? 91",
+          "step": 5,
+          "sources": [
+            "BabyYellow",
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "F4 03 01 2A ? 00 00 34 ? ? ? ? ? ? ? ? ? ? 00 54 ? 00 00 14 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "BabyYellow",
+            "RooftopsParkour"
+          ]
+        }
+      ],
+      "GetNamesPtr": [
+        {
+          "pattern": "02 ? 91 C8 00 00 37 ? ? ? ? ? ? ? 91",
+          "step": 7,
+          "sources": [
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "39 C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52 ? ? ? 39",
+          "step": 5,
+          "sources": [
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97",
+          "step": 4,
+          "sources": [
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "C8 00 00 37 ? ? ? ? ? ? ? 91 ? ? ? 97 ? 00 80 52",
+          "step": 4,
+          "sources": [
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? ? ? ? ? A8 02 ? 39",
+          "step": 24,
+          "sources": [
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "F4 4F 01 A9 FD 7B 02 A9 FD 83 00 91 ? ? ? ? A8 02 ? 39",
+          "step": 36,
+          "sources": [
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "F8 C8 ? ? 39 C8 00 00 37 ? ? ? ? ? ? ? 91",
+          "step": 9,
+          "sources": [
+            "RooftopsParkour"
+          ]
+        },
+        {
+          "pattern": "FD 7B 01 A9 FD 43 00 91 ? ? ? ? 89 ? ? 39 F3 03 08 AA C9 00 00 37 ? ? ? ? ? ? ? 91",
+          "step": 24,
+          "sources": [
+            "RooftopsParkour"
+          ]
+        }
+      ]
+    }
+  },
+  "symbolStrategies": {
+    "UE4_00_17": [
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "Lineage2"
+      },
+      {
+        "symbol": "_ZN5FName16GetIsInitializedEv",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "Lineage2"
+      }
+    ],
+    "UE4_20": [
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "BladeSoul"
+      },
+      {
+        "symbol": "_ZN5FName16GetIsInitializedEv",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "BladeSoul"
+      }
+    ],
+    "UE4_22": [
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "SFG2"
+      },
+      {
+        "symbol": "GFNameTableForDebuggerVisualizers_MT",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "SFG2"
+      }
+    ],
+    "UE4_23_24": [
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "Dislyte"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "Dislyte"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "OdinValhalla"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "OdinValhalla"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "RealBoxing2"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "RealBoxing2"
+      }
+    ],
+    "UE4_25_27": [
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "ArkUltimate"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "ArkUltimate"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "Auroria"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "Auroria"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "BlackClover"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "BlackClover"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "Case2"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "Case2"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "Century"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "Century"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "HelloNeighbor"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "HelloNeighbor"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "Injustice2"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "Injustice2"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "LineageW"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "LineageW"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "MortalKombat"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "MortalKombat"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "TowerFantasy"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "TowerFantasy"
+      },
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "WutheringWaves"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "WutheringWaves"
+      }
+    ],
+    "UE5_00_02": [
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "HelloNeighborND"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "HelloNeighborND"
+      }
+    ],
+    "UE5_03": [
+      {
+        "symbol": "GUObjectArray",
+        "function": "GetGUObjectArrayPtr",
+        "decodeAdrl": false,
+        "from": "BabyYellow"
+      },
+      {
+        "symbol": "GNameBlocksDebug",
+        "function": "GetNamesPtr",
+        "decodeAdrl": false,
+        "from": "BabyYellow"
+      }
+    ]
+  }
+}
