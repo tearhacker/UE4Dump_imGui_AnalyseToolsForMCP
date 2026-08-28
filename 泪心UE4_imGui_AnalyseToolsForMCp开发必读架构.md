@@ -589,6 +589,64 @@ async def start_probe(wait_ms: int = Field(default=5000, ge=0, le=60000)) -> dic
 
 ---
 
+## 5.6 ❗设备端代码清单（**v1.1 新增，澄清"不搬 profile ≠ 不写代码"**）
+
+> 不移植 AndUEDumper 的 24 个 profile，**不等于** `src/` 不用改。
+> 设备侧新增约 **3000 行 C++**，另有一批"已有但从未接线"的能力需要接上。
+
+### 5.6.1 已有且已接线（零改动，直接用）
+
+| 能力 | 位置 |
+|---|---|
+| 读/写/扫描/ELF/转储 | `KittyMemoryMgr` |
+| pattern 与字节搜索 | `KittyScanner` |
+| 指针可读性校验 | `KittyPtrValidator` |
+| 远程读值 / ADRP 解码 | `UEMemory`（含 `DecodeADRL` / `Decode_ADRP_ADD` / `Decode_ADRP_LDR`） |
+| UE 层 / AutoFix / Dumper | `src/UE`、`src/AutoFix`、`src/Dumper.cpp` |
+
+### 5.6.2 已有但**从未接线**（要写胶水，这是最划算的部分）
+
+| 能力 | 位置 | 现状 | 需要补 |
+|---|---|---|---|
+| **`findSymbol`（符号定位）** | `KittyScanner.hpp:211` | **`src/` 里零调用** | 符号优先策略（优先级①）的全部逻辑 |
+| **`KittyTraceMgr`（ptrace 远程调用）** | `KittyTrace.cpp:140` | **`src/` 里零引用** | 实例化 + 批量封装 + scratch + 会话看门狗 |
+
+> `src/` 中出现的 `GUObjectArray` 字样仅 2 处
+> （`executable.cpp:437` / `:491`），都是**输出标签**，不是符号查找。
+
+### 5.6.3 完全不存在（全新代码，约 3000 行）
+
+| 模块 | 内容 | 预估行数 |
+|---|---|---|
+| 命令服务 | socket 监听 + `HELLO` 握手 + 协议收发 | 400 |
+| 命令队列与分发 | mutex + condition_variable + 分发表 | 250 |
+| 符号定位 | 按版本试 4 个引擎原生符号 + 解引用回减 | 150 |
+| **多锚点改造** | 改 `GetNamesPtr()`，用上 §2.3 那份名单 | 80 |
+| 参数化扫描 | `scanGNames` / `scanObjects`（指针范围、锚点、区域可调） | 400 |
+| 采样 | 取名字/对象样本（AI 判定命脉） | 200 |
+| ptrace 胶水 | `callRemoteFunctionBatch` + `allocScratch` + 会话看门狗 | 300 |
+| 类索引与查询 | 建索引 + `searchClasses` / `describeClass` | 300 |
+| Sample/Job 管理 | 长任务 jobId、进度、取消 | 150 |
+| 复合操作 | `followPointerChain` 等 | 150 |
+| 高层用例 | `locateEngineGlobals` / `dumpSDK` | 350 |
+| **接线** | `executable.cpp` 起线程 + 每帧 poll（±10 行） | 15 |
+
+**PC 侧另需约 900 行 Python**（server + 工具定义 + instructions + 反汇编封装）。
+
+### 5.6.4 建议实施顺序（每项都可独立验证）
+
+```
+① 多锚点改造（80 行）        ← 最小改动，最先验证价值
+② 符号定位接线（150 行）      ← 最快路径，性价比最高
+③ extract 出的 pattern 库接入  ← 数据已备好（ue_pattern_library.json）
+④ 命令服务 + 队列（650 行）    ← 打通链路，此后才能远程驱动
+⑤ 参数化扫描 + 采样（600 行）  ← AI 闭环的核心
+⑥ ptrace 胶水（300 行）        ← 加密场景与函数级验证
+⑦ 类索引 + 高层用例（650 行）  ← 体验层
+```
+
+---
+
 ## 5.1 目录结构
 
 ```
