@@ -1,5 +1,9 @@
 # 任务 1 · `GetNamesPtr()` 多锚点改造
 
+> **状态（2026-08-29 更新）：代码改动已完成 ✅，整项目编译通过 ✅，真机验收未执行。**
+> 编译环境：NDK r27d（`D:\ProgramerDevelop\windowsNDK27`）+ VS2026 自带 cmake/ninja，
+> 51/51 目标编译链接通过，产物 `outputs/arm64-v8a/UnrealMemoryTools`（3.2 MB）。
+
 > 属于《开发必读架构》§5.6.4 实施顺序的第 ① 项。
 > **预估改动量：约 85 行。风险：低。收益：直接。**
 > 这是全部七个任务里**投入产出比最高**的一个——改动最小，但直接命中
@@ -218,6 +222,19 @@ PUBG 变体（`q3 + 0x24`）同样处理。
 - `isByteProperty` 若无处引用则删除；若仍被别处使用则保留
 - 日志补上实际命中的偏移量，便于事后分析哪个偏移在当前游戏上有效
 
+### 实际落地与方案的差异（2026-08-29 核对，均为等价或改进）
+
+| 项 | 方案 | 实际实现 |
+| --- | --- | --- |
+| 名单命名 | `kEngineNames` | `kKnownNames`（复用原名，内容相同，`BruteForceDeltaForceNames` 已共用） |
+| 两级判定 | `TryExactAnchors` + `CountEngineNamesInWindow` 两个函数 | 合并为 `ScanEngineNameAnchors()`，返回 `AnchorScanResult{hit, exact, offset, hits}` |
+| 远程读次数 | 每个候选偏移读一次（最多 6 次） | **单次读 128 字节窗口后本地跑两级判定**（更省，`kAnchorWindowSize=128`） |
+| Tier2 命中处理 | 命中即用 | **宽松命中不立即返回**：记入 `weakPool`/`weakGNames`，整轮扫完无精确命中才回退使用——避免靠前的弱结果盖掉后面的精确命中 |
+| 日志 | 含 `anchorOff` | 含 `anchorOff` + `hits`（命中引擎名数量），Tier2 回退时 `LOGW` 提示用 probe 复核 |
+
+**结论**：实际实现覆盖方案全部要点，且在远程读次数与候选竞争处理上优于方案。
+备份文件已改名 `UEGameProfile未改动代码.cpp.bak`，不会被 `file(GLOB src/UE/*.cpp)` 误编译。
+
 ***
 
 ## 4. 明确不做（避免范围蔓延）
@@ -231,26 +248,42 @@ PUBG 变体（`q3 + 0x24`）同样处理。
 
 ***
 
-## 5. 前置条件
+## 5. 前置条件（已完成 ✅，2026-08-29 实测）
 
-⚠️ **CMakeLists.txt 第 2 行硬编码了 NDK 路径**：
-
-```cmake
-set(NDK_PATH E:/ndk/android-ndk-r29)
-```
-
-而你的 NDK 在 `D:/ProgramerDevelop/ndk23`，且项目要求 **NDK r25+**。
-**先确认能正常构建，再动手改代码。**
-
-建议改为可覆盖形式，避免改动被误提交：
+`CMakeLists.txt` 第 2 行的硬编码已改为可覆盖形式：
 
 ```cmake
+# 允许构建时覆盖：-DNDK_PATH=D:/ProgramerDevelop/ndk23
 if(NOT DEFINED NDK_PATH)
     set(NDK_PATH E:/ndk/android-ndk-r29)
 endif()
 ```
 
-然后构建时传入：`cmake -S . -B build -G Ninja -DNDK_PATH=D:/ProgramerDevelop/ndk23`
+实测配置命令（VS2026 自带 cmake/ninja，本机 PATH 无）：
+
+```
+cmake -S . -B build -G Ninja -DNDK_PATH=D:/ProgramerDevelop/windowsNDK27
+cmake --build build
+```
+
+### NDK 版本踩坑与解决（已解决 ✅）
+
+第一次实测用的 `D:\ProgramerDevelop\ndk23` 实为 **NDK r23.2**（source.properties: 23.2.8568313），
+**低于项目要求的 r25+**。配置可以通过，但整项目构建在 `src/Dumper.cpp` 失败，
+两个错误均与本任务无关（本任务只改了 `UEGameProfile.cpp`，且该文件单独编译通过）：
+
+| 错误 | 根因 |
+|---|---|
+| `json.hpp:6094` `u8string()` 类型不匹配 | r23 的 libc++ 中 `filesystem::u8string()` 返回 `std::string`，而 `nlohmann/json`（C++20 写法）期望 `std::u8string`；r25+ 的 libc++ 已修正 |
+| `Dumper.cpp:427` `operator==` 二义性 | 同为工具链版本相关的重载决议差异 |
+
+**解决**：改用 **NDK r27d**（`D:\ProgramerDevelop\windowsNDK27`，Pkg.Revision=27.3.13750724），
+重新配置后 **51/51 目标编译链接全部通过**，产物
+`outputs/arm64-v8a/UnrealMemoryTools`（约 3.2 MB）。
+两个报错未改任何代码，纯工具链升级即消失，反向确认与任务 1 改动无关。
+
+注：本机 PATH 无 cmake/ninja，用的是 VS2026 自带版本：
+`D:\ProgramerDevelop\VS2026\SDK\Common7\IDE\CommonExtensions\Microsoft\CMake\`。
 
 （README 也提示过：Windows 上 Ninja 在中文路径下会偶发 `GetOverlappedResult`，
 建议用英文路径或在 CLion 内构建。）
@@ -259,13 +292,13 @@ endif()
 
 ## 6. 验收标准
 
-| # | 标准                | 判定方式                                                          |
-| - | ----------------- | ------------------------------------------------------------- |
-| 1 | **编译通过**          | ninja 无 error                                                 |
-| 2 | **自有游戏定位成功且地址正确** | 拿你自己的 UE4 手游（有 ground truth）测，日志里的 `FNamePool @ 0x...` 与已知值一致 |
-| 3 | **回归不破**          | 至少 2 款原本 AutoFix 能成功的游戏，改造后仍成功                                |
-| 4 | **无新增误报**         | 指向一个非 UE 进程，不得返回非零地址                                          |
-| 5 | **日志可读**          | 日志含实际命中的 `anchorOff`，便于后续统计哪个偏移最常见                            |
+| # | 标准                | 判定方式                                                          | 状态（2026-08-29） |
+| - | ----------------- | ------------------------------------------------------------- | ----------- |
+| 1 | **编译通过**          | ninja 无 error                                                 | ✅ 51/51 通过，产物已生成（NDK r27d） |
+| 2 | **自有游戏定位成功且地址正确** | 拿你自己的 UE4 手游（有 ground truth）测，日志里的 `FNamePool @ 0x...` 与已知值一致 | ⬜ 待真机测试 |
+| 3 | **回归不破**          | 至少 2 款原本 AutoFix 能成功的游戏，改造后仍成功                                | ⬜ 待真机测试 |
+| 4 | **无新增误报**         | 指向一个非 UE 进程，不得返回非零地址                                          | ⬜ 待真机测试 |
+| 5 | **日志可读**          | 日志含实际命中的 `anchorOff`，便于后续统计哪个偏移最常见                            | ✅ 代码已实现（含 `anchorOff` 与 `hits`） |
 
 **第 2 条最关键**——你有 ground truth，这是别人没有的优势。
 改造前后各跑一次，直接对比。
@@ -303,15 +336,16 @@ git 上单独一个提交，随时可 revert。
 
 ***
 
-## 附：改动位置速查
+## 附：改动位置速查（改造后实际行号，2026-08-29）
 
 | 内容                      | 行号                                                      |
 | ----------------------- | ------------------------------------------------------- |
-| `GetNamesPtr()` 函数体     | `src/UE/UEGameProfile.cpp:971-1084`                     |
-| `isByteProperty` lambda | `:999-1002`                                             |
-| `tryFNamePool` lambda   | `:1028-1040`                                            |
-| `tryGNames` lambda      | `:1042-1066`（PUBG 变体 `:1052-1063`）                      |
-| 偏好顺序分支                  | `:1068-1077`                                            |
-| **可复用的名单（现为局部 static）** | **`:80-84`**（位于 `BruteForceDeltaForceNames()`，起始 `:64`） |
-| CMake NDK 路径            | `CMakeLists.txt:2`                                      |
+| `GetNamesPtr()` 函数体     | `src/UE/UEGameProfile.cpp:1061-1239`                    |
+| `isByteProperty` lambda | **已删除**（被 `ScanEngineNameAnchors` 取代）                   |
+| 文件级常量与判定函数（匿名 namespace）| `:65-156`（名单 `:68`、`kMinAnchorHits` `:76`、`MatchEngineName` `:92`、`ScanEngineNameAnchors` `:115`） |
+| `tryFNamePool` lambda   | `:1122-1147`                                            |
+| `tryGNames` lambda      | `:1149-1209`（PUBG 变体 `:1177-1206`）                     |
+| 偏好顺序分支                  | `:1211-1220`                                            |
+| 宽松命中回退（`weakPool`/`weakGNames`） | `:1095-1096` 定义、`:1226-1235` 使用                |
+| CMake NDK 路径            | `CMakeLists.txt:2-5`（已改为可覆盖形式）                          |
 

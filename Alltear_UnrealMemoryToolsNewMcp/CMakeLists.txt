@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.10)
-set(NDK_PATH E:/ndk/android-ndk-r29)
+# 允许构建时覆盖：-DNDK_PATH=D:/ProgramerDevelop/ndk23
+if(NOT DEFINED NDK_PATH)
+    set(NDK_PATH E:/ndk/android-ndk-r29)
+endif()
 set(CMAKE_TOOLCHAIN_FILE ${NDK_PATH}/build/cmake/android.toolchain.cmake)
 set(CMAKE_SYSTEM_NAME Android)
 set(CMAKE_BUILD_TYPE Release)
