@@ -1,0 +1,394 @@
+
+#include <cerrno>
+#include <chrono>
+#include <cstdio>
+#include <iostream>
+#include <unordered_map>
+#include <string>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <thread>
+
+#include <argsparse/argsparse.hpp>
+#define kPROGRAM_NAME "UEDump3r"
+#define kPROGRAM_VER "4.3.2"
+
+#include "Utils/Logger.hpp"
+#include "Utils/ProgressUtils.hpp"
+
+#include "Dumper.hpp"
+
+#include "UE/UEMemory.hpp"
+#include "UE/UEGameProfile.hpp"
+
+#include "UE/UEGameProfiles/ArenaBreakout.hpp"
+#include "UE/UEGameProfiles/BlackClover.hpp"
+#include "UE/UEGameProfiles/Dislyte.hpp"
+#include "UE/UEGameProfiles/Farlight.hpp"
+#include "UE/UEGameProfiles/MortalKombat.hpp"
+#include "UE/UEGameProfiles/PES.hpp"
+#include "UE/UEGameProfiles/Torchlight.hpp"
+#include "UE/UEGameProfiles/WutheringWaves.hpp"
+#include "UE/UEGameProfiles/RealBoxing2.hpp"
+#include "UE/UEGameProfiles/OdinValhalla.hpp"
+#include "UE/UEGameProfiles/Injustice2.hpp"
+#include "UE/UEGameProfiles/DeltaForce.hpp"
+#include "UE/UEGameProfiles/RooftopsParkour.hpp"
+#include "UE/UEGameProfiles/BabyYellow.hpp"
+#include "UE/UEGameProfiles/TowerFantasy.hpp"
+#include "UE/UEGameProfiles/BladeSoul.hpp"
+#include "UE/UEGameProfiles/Lineage2.hpp"
+#include "UE/UEGameProfiles/NightCrows.hpp"
+#include "UE/UEGameProfiles/Case2.hpp"
+#include "UE/UEGameProfiles/KingArthur.hpp"
+#include "UE/UEGameProfiles/Century.hpp"
+#include "UE/UEGameProfiles/HelloNeighbor.hpp"
+#include "UE/UEGameProfiles/HelloNeighborND.hpp"
+#include "UE/UEGameProfiles/SFG2.hpp"
+#include "UE/UEGameProfiles/ArkUltimate.hpp"
+#include "UE/UEGameProfiles/Auroria.hpp"
+#include "UE/UEGameProfiles/LineageW.hpp"
+#include "UE/UEGameProfiles/RLSideswipe.hpp"
+#include "UE/UEGameProfiles/PUBG.hpp"
+
+std::vector<IGameProfile *> UE_Games = {
+    new PESProfile(),
+    new DislyteProfile(),
+    new MortalKombatProfile(),
+    new FarlightProfile(),
+    new TorchlightProfile(),
+    new ArenaBreakoutProfile(),
+    new BlackCloverProfile(),
+    new WutheringWavesProfile(),
+    new RealBoxing2Profile(),
+    new OdinValhallaProfile(),
+    new Injustice2Profile(),
+    new DeltaForceProfile(),
+    new RooftopParkourProfile(),
+    new BabyYellowProfile(),
+    new TowerFantasyProfile(),
+    new BladeSoulProfile(),
+    new Lineage2Profile(),
+    new Case2Profile(),
+    new CenturyProfile(),
+    new KingArthurProfile(),
+    new NightCrowsProfile(),
+    new HelloNeighborProfile(),
+    new HelloNeighborNDProfile(),
+    new SFG2Profile(),
+    new ArkUltimateProfile(),
+    new AuroriaProfile(),
+    new LineageWProfile(),
+    new RLSideswipeProfile(),
+    new PUBGProfile(),
+};
+
+bool bNeededHelp = false;
+
+int main(int argc, char **args)
+{
+    setbuf(stdout, nullptr);
+    setbuf(stderr, nullptr);
+    setbuf(stdin, nullptr);
+
+    LOGI("Using UE Dumper %s", kPROGRAM_VER);
+
+    argparse::ArgumentParser program(kPROGRAM_NAME, kPROGRAM_VER);
+
+    std::string gamePkg, outputDir;
+    bool bDumpLib = false;
+    int memAccessType = 0;
+
+    program.add_argument("-p", "--package")
+        .help("Specify game package ID in advance.")
+        .store_into(gamePkg)
+        .metavar("<name>");
+
+    program.add_argument("-o", "--output")
+        .help("Output directory path.")
+        .required()
+        .store_into(outputDir)
+        .metavar("<path>");
+
+    program.add_argument("-d", "--dump").help("Dump UE library from memory.").store_into(bDumpLib);
+
+    program.add_argument("-m", "--mem")
+        .help("Specify memory access type in advance.")
+        .choices(1, 2)
+        .store_into(memAccessType);
+
+    try
+    {
+        program.parse_args(argc, args);
+    }
+    catch (const std::exception &err)
+    {
+        std::cerr << err.what() << std::endl;
+        std::cerr << program;
+        return 1;
+    }
+
+    if (outputDir.empty())
+    {
+        LOGE("Output directory path is not specified.");
+        return 1;
+    }
+
+    if (gamePkg.empty())
+    {
+        std::sort(UE_Games.begin(), UE_Games.end(), [](const IGameProfile *a, const IGameProfile *b)
+        {
+            return a->GetAppName() < b->GetAppName();
+        });
+
+        std::cout << "Choose from the available running games:" << std::endl;
+        int gameIndex = 1;
+        std::map<int, std::pair<int, int>> gameIndexMap;
+        for (size_t i = 0; i < UE_Games.size(); i++)
+        {
+            const auto &appIDs = UE_Games[i]->GetAppIDs();
+            for (size_t j = 0; j < appIDs.size(); j++)
+            {
+                if (KittyMemoryEx::getProcessID(appIDs[j]) <= 0)
+                    continue;
+
+                const char *nspace = gameIndex < 10 ? "  " : " ";
+                std::cout << "\t" << gameIndex << nspace << ": " << UE_Games[i]->GetAppName() << " | " << appIDs[j].c_str() << std::endl;
+                gameIndexMap[gameIndex] = {i, j};
+                gameIndex++;
+            }
+        }
+
+        std::cout << "Game number: ";
+        int gameNumber = 0;
+        scanf("%d", &gameNumber);
+        if (gameIndexMap.count(gameNumber) <= 0)
+        {
+            LOGE("Game number is not available.");
+            return 1;
+        }
+
+        gamePkg = UE_Games[gameIndexMap[gameNumber].first]->GetAppIDs()[gameIndexMap[gameNumber].second];
+    }
+
+    auto gamePIDs = KittyMemoryEx::getProcessIDs(gamePkg);
+    if (gamePIDs.empty())
+    {
+        LOGE("Couldn't find \"%s\" in the running processes list.", gamePkg.c_str());
+        return 1;
+    }
+
+    pid_t gamePID = 0;
+    if (gamePIDs.size() > 1)
+    {
+        std::cout << "Found multiple processes with same package name, Choose one: " << std::endl;
+        for (size_t i = 0; i < gamePIDs.size(); i++)
+        {
+            std::cout << "\t" << i+1 << ": PID(" << gamePIDs[i] << ")" << std::endl;
+        }
+        std::cout << "Process number: ";
+        int gamePidIndex = 0;
+        scanf("%d", &gamePidIndex);
+        gamePidIndex--;
+        if (gamePidIndex < 0 || gamePidIndex >= int(gamePIDs.size()))
+        {
+            LOGE("Selected PID index is out of range.");
+            return 1;
+        }
+        gamePID = gamePIDs[gamePidIndex];
+    }
+    else
+    {
+        gamePID = gamePIDs.front();
+    }
+
+    if (memAccessType == 0)
+    {
+        std::cout << "Choose memory access type: " << std::endl;
+        std::cout << "\t" << "1: process_vm_readv" << std::endl;
+        std::cout << "\t" << "2: pread" << std::endl;
+        std::cout << "Memory access: ";
+        scanf("%d", &memAccessType);
+        if (memAccessType < 1 || memAccessType > 2)
+        {
+            LOGE("Selected memory access is out of range.");
+            return 1;
+        }
+    }
+
+    LOGI("Game: %s", gamePkg.c_str());
+    LOGI("Process ID: %d", gamePID);
+    LOGI("Output directory: %s", outputDir.c_str());
+    LOGI("Dump Library: %s", bDumpLib ? "true" : "false");
+    LOGI("==========================");
+
+    std::string sDumpDir = outputDir + "/UEDump3r";
+    std::string sDumpGameDir = sDumpDir + "/" + gamePkg;
+    IOUtils::delete_directory(sDumpGameDir);
+
+    if (IOUtils::mkdir_recursive(sDumpGameDir, 0777) == -1)
+    {
+        int err = errno;
+        LOGE("Couldn't create Output Directory [\"%s\"] error=%d | %s.", sDumpDir.c_str(), err, strerror(err));
+        return 1;
+    }
+
+    LOGI("Initializing Memory...");
+    EKittyMemOP memOp = memAccessType == 1 ? EK_MEM_OP_SYSCALL : EK_MEM_OP_IO;
+    if (!kMgr.initialize(gamePID, memOp, false) && !kMgr.initialize(gamePID, EK_MEM_OP_IO, false))
+    {
+        LOGE("Failed to initialize KittyMemoryMgr.");
+        return 1;
+    }
+
+    UEDumper uEDumper{};
+
+    uEDumper.setDumpExeInfoNotify([](bool bFinished)
+    {
+        if (!bFinished)
+        {
+            LOGI("Dumping Executable Info...");
+        }
+    });
+
+    uEDumper.setDumpNamesInfoNotify([](bool bFinished)
+    {
+        if (!bFinished)
+        {
+            LOGI("Dumping Names Info...");
+        }
+    });
+
+    uEDumper.setDumpObjectsInfoNotify([](bool bFinished)
+    {
+        if (!bFinished)
+        {
+            LOGI("Dumping Objects Info...");
+        }
+    });
+
+    uEDumper.setDumpOffsetsInfoNotify([](bool bFinished)
+    {
+        if (!bFinished)
+        {
+            LOGI("Dumping Offsets Info...");
+        }
+    });
+
+    uEDumper.setObjectsProgressCallback([](const SimpleProgressBar &progress)
+    {
+        static bool once = false;
+        if (!once)
+        {
+            once = true;
+            LOGI("Gathering UObjects....");
+        };
+        static int lastPercent = -1;
+        int currPercent = progress.getPercentage();
+        if (lastPercent != currPercent)
+        {
+            lastPercent = currPercent;
+            progress.print();
+            if (progress.isComplete())
+                std::cout << "\n";
+        }
+    });
+
+    uEDumper.setDumpProgressCallback([](const SimpleProgressBar &progress)
+    {
+        static bool once = false;
+        if (!once)
+        {
+            once = true;
+            LOGI("Dumping....");
+        };
+        static int lastPercent = -1;
+        int currPercent = progress.getPercentage();
+        if (lastPercent != currPercent)
+        {
+            lastPercent = currPercent;
+            progress.print();
+            if (progress.isComplete())
+                std::cout << "\n";
+        }
+    });
+
+    bool dumpSuccess = false;
+    std::unordered_map<std::string, BufferFmt> dumpbuffersMap;
+    auto dmpStart = std::chrono::steady_clock::now();
+
+    for (auto &it : UE_Games)
+    {
+        for (auto &pkg : it->GetAppIDs())
+        {
+            if (gamePkg != pkg)
+                continue;
+
+            if (bDumpLib)
+            {
+                auto ue_elf = it->GetUnrealELF();
+                if (!ue_elf.isValid())
+                {
+                    LOGE("Couldn't find a valid UE ELF in target process maps.");
+                    return 1;
+                }
+
+                LOGI("Dumping unreal lib from memory...");
+                std::string libDumpPath = KittyUtils::String::fmt("%s/libUE_%p-%p.so", sDumpGameDir.c_str(), ue_elf.base(), ue_elf.end());
+                bool res = kMgr.dumpMemELF(ue_elf, libDumpPath);
+                LOGI("Dumping lib: %s.",  res ? "success" : "failed");
+                if (res)
+                {
+                    LOGI("%s", libDumpPath.c_str());
+                }
+                LOGI("==========================");
+            }
+
+            LOGI("Initializing Dumper...");
+            if (uEDumper.Init(it))
+            {
+                dumpSuccess = uEDumper.Dump(&dumpbuffersMap);
+            }
+
+            goto done;
+        }
+    }
+
+done:
+
+    if (!dumpSuccess && uEDumper.GetLastError().empty())
+    {
+        LOGE("Game is not supported. check AppID.");
+        return 1;
+    }
+
+    if (dumpbuffersMap.empty())
+    {
+        LOGE("Dump Failed, Error <Buffers empty>");
+        LOGE("Dump Status <%s>", uEDumper.GetLastError().c_str());
+        return 1;
+    }
+
+    LOGI("Saving Files...");
+
+    for (const auto &it : dumpbuffersMap)
+    {
+        if (!it.first.empty())
+        {
+            std::string path = KittyUtils::String::fmt("%s/%s", sDumpGameDir.c_str(), it.first.c_str());
+            it.second.writeBufferToFile(path);
+        }
+    }
+
+    auto dmpEnd = std::chrono::steady_clock::now();
+    std::chrono::duration<float, std::milli> dmpDurationMS = (dmpEnd - dmpStart);
+
+    if (!uEDumper.GetLastError().empty())
+    {
+        LOGI("Dump Status: %s", uEDumper.GetLastError().c_str());
+    }
+    LOGI("Dump Duration: %.2fms", dmpDurationMS.count());
+    LOGI("Dump Location: %s", sDumpGameDir.c_str());
+
+    return 0;
+}
