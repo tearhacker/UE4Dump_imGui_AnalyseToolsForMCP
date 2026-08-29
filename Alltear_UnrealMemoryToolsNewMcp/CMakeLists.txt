@@ -22,6 +22,8 @@ set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS} -O2 -s -std=c++20 -fexceptions -
 file(GLOB UE_SRC src/UE/*.cpp)
 file(GLOB UE_PROFILE_SRC src/UE/UEGameProfiles/*.cpp)
 file(GLOB AUTOFIX_SRC src/AutoFix/*.cpp)
+# MCP 命令服务（服务端）
+file(GLOB MCP_SRC src/mcp/*.cpp)
 file(GLOB GUI_SRC
         src/GUI/Android_draw/*.cpp
         src/GUI/Android_Graphics/*.cpp
@@ -48,7 +50,7 @@ include_directories(
         src/GUI/native_surface)
 link_libraries(-llog -landroid -lEGL -lGLESv3 -lvulkan -lz -ldl)
 
-add_executable(UnrealMemoryTools ${UE_SRC} ${UE_PROFILE_SRC} ${AUTOFIX_SRC} ${GUI_SRC} src/executable.cpp src/Dumper.cpp src/UPackageGenerator.cpp src/SDKExplorer.cpp ${KITTYMEMORY_SRC} ${DEPS_PATH}/fmt/format.cc
+add_executable(UnrealMemoryTools ${UE_SRC} ${UE_PROFILE_SRC} ${AUTOFIX_SRC} ${MCP_SRC} ${GUI_SRC} src/executable.cpp src/Dumper.cpp src/UPackageGenerator.cpp src/SDKExplorer.cpp ${KITTYMEMORY_SRC} ${DEPS_PATH}/fmt/format.cc
         src/AutoFix/NativeFunctionResolver.cpp
         src/AutoFix/PropertyOffsetFinder.cpp
         src/AutoFix/StructLayout.cpp

@@ -1,0 +1,12 @@
+# 官方 MCP SDK —— 必须 pin v1
+# v2 (2.x) 已将 FastMCP 重命名为 MCPServer 并变更多处 API，本项目代码基于 v1
+# 迁移参考: https://py.sdk.modelcontextprotocol.io/v2/migration/
+mcp>=1.0,<2
+
+# PC 侧反汇编（E 组 disassemble 工具）
+# 可缺失降级：缺失时返回明确提示，不静默失败
+capstone>=5.0,<6
+
+# 测试（不连真机即可跑）
+pytest>=8.0
+pytest-asyncio>=0.23

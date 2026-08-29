@@ -1,2 +1,14 @@
 # 构建中间产物（本地生成，不入库）
 Alltear_UnrealMemoryToolsNewMcp/build/
+
+# 编译产物（adb push 用，不入库）
+Alltear_UnrealMemoryToolsNewMcp/outputs/
+
+# 调试残留
+*.bak
+
+# Python 虚拟环境与缓存（本地生成，不入库）
+.venv/
+venv/
+__pycache__/
+*.pyc

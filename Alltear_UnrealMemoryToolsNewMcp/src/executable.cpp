@@ -35,6 +35,13 @@
 #include "Android_draw/draw.h"
 #include "Android_Graphics/GraphicsManager.h"
 
+#include "mcp/CommandDispatcher.hpp"
+#include "mcp/CommandQueue.hpp"
+#include "mcp/CommandServer.hpp"
+#include "mcp/Protocol.hpp"
+
+#include <nlohmann/json.hpp>
+
 std::vector<IGameProfile *> UE_Games = {
     new ArenaBreakoutProfile(),
     new DeltaForceProfile(),
@@ -987,6 +994,91 @@ namespace
             gWorkerThread.join();
         gWorkerThread = std::thread(ExecuteDumpUnrealLib, gCandidates[gSelectedIndex]);
     }
+
+    // ---------------------------------------------------------------------
+    // MCP 命令注册（服务端）
+    //
+    // 三个 MVP 命令全部是快命令（isFast=true），在主线程 Layout_tick_UI 之后
+    // 由 CommandDispatcher::PollOnce() 执行——UMT 全局非线程安全，放主线程
+    // 即与 UI 操作天然串行。
+    //
+    // 本函数定义在匿名 namespace 内部，因此可以直接访问 FindAutoProcessCandidates
+    // 与 gDumpUiState。
+    // ---------------------------------------------------------------------
+    void SetupMcpCommands()
+    {
+        using json = nlohmann::json;
+
+        // PING —— 连通性与版本验证，不触碰任何 UMT 状态
+        UmtMcp::CommandDispatcher::Register("PING",
+                                            [](const json &) -> json
+                                            {
+                                                return {{"build", kUEDUMPER_VERSION},
+                                                        {"protocol", UmtMcp::kProtocolVersion},
+                                                        {"connected", true}};
+                                            },
+                                            true);
+
+        // LIST_PROCESSES —— 外迁 FindAutoProcessCandidates()
+        UmtMcp::CommandDispatcher::Register("LIST_PROCESSES",
+                                            [](const json &args) -> json
+                                            {
+                                                const bool dedicatedOnly = args.value("dedicatedOnly", false);
+
+                                                json arr = json::array();
+                                                for (const auto &c : FindAutoProcessCandidates())
+                                                {
+                                                    if (dedicatedOnly && !c.dedicated)
+                                                        continue;
+                                                    arr.push_back({{"pid", c.pid},
+                                                                   {"package", c.package},
+                                                                   {"profileName", c.profileName},
+                                                                   {"dedicated", c.dedicated}});
+                                                }
+                                                return {{"processes", arr}};
+                                            },
+                                            true);
+
+        // GET_LOGS —— 读 gDumpUiState.logLines 环形缓冲（必须持 mutex）
+        UmtMcp::CommandDispatcher::Register("GET_LOGS",
+                                            [](const json &args) -> json
+                                            {
+                                                const int sinceIndex = args.value("sinceIndex", 0);
+                                                int maxLines = args.value("maxLines", 50);
+                                                if (maxLines <= 0)
+                                                    maxLines = 50;
+                                                if (maxLines > static_cast<int>(kMaxLogLines))
+                                                    maxLines = static_cast<int>(kMaxLogLines);
+
+                                                json lines = json::array();
+                                                int total = 0;
+                                                {
+                                                    std::lock_guard<std::mutex> lock(gDumpUiState.mutex);
+                                                    total = static_cast<int>(gDumpUiState.logLines.size());
+
+                                                    for (int i = sinceIndex;
+                                                         i < total && static_cast<int>(lines.size()) < maxLines;
+                                                         ++i)
+                                                    {
+                                                        const std::string &raw = gDumpUiState.logLines[i];
+                                                        // PushUiLog 格式："<level>: <message>"
+                                                        std::string level;
+                                                        std::string message = raw;
+                                                        if (raw.size() >= 2 && raw[1] == ':')
+                                                        {
+                                                            level = raw.substr(0, 1);
+                                                            message = (raw.size() > 3) ? raw.substr(3) : std::string();
+                                                        }
+                                                        lines.push_back({{"index", i},
+                                                                         {"level", level},
+                                                                         {"timestamp", ""},
+                                                                         {"message", message}});
+                                                    }
+                                                }
+                                                return {{"lines", lines}, {"totalLines", total}};
+                                            },
+                                            true);
+    }
 } // namespace
 
 void RenderAutoUEDumpPanel(bool *main_thread_flag)
@@ -1309,6 +1401,24 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
         ImGui::Dummy(ImVec2(0.0f, 8.0f));
         drawActionButtons();
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
+
+        // ---- MCP 命令服务状态与 token（PC 侧连接必须填此 token）----
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        if (UmtMcp::CommandServer::IsRunning())
+        {
+            ImGui::TextColored(ImVec4(0.36f, 0.92f, 0.45f, 1.0f), "%s",
+                               Tr("MCP 服务已启动", "MCP service running"));
+            ImGui::Text("%s 127.0.0.1:%d", Tr("监听", "Listen"), (int)UmtMcp::kDefaultPort);
+            ImGui::Text("%s", Tr("MCP Token（填到 PC 侧配置）", "MCP Token (for PC config)"));
+            ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.36f, 1.0f), "%s",
+                               UmtMcp::CommandServer::Token().c_str());
+        }
+        else
+        {
+            ImGui::TextDisabled("%s", Tr("MCP 服务未运行", "MCP service not running"));
+        }
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
 
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
@@ -1767,6 +1877,23 @@ int main()
     Logger::SetSink(LoggerSink);
     RefreshCandidates();
 
+    // ---- MCP 命令服务（服务端，bind 127.0.0.1:27185）----
+    {
+        static UmtMcp::CommandQueue mcpQueue;
+        UmtMcp::CommandDispatcher::BindQueue(&mcpQueue);
+        SetupMcpCommands();
+
+        if (UmtMcp::CommandServer::Start(UmtMcp::kDefaultPort, &mcpQueue, kUEDUMPER_VERSION))
+        {
+            // 一次性 token：用户需填到 PC 侧配置（后续应在 UI 面板显示）
+            LOGI("[MCP] 命令服务已就绪，一次性 token = %s", UmtMcp::CommandServer::Token().c_str());
+        }
+        else
+        {
+            LOGE("[MCP] 命令服务启动失败");
+        }
+    }
+
     ::graphics = GraphicsManager::getGraphicsInterface(GraphicsManager::VULKAN);
     if (!::graphics)
     {
@@ -1809,8 +1936,12 @@ int main()
             android::ANativeWindowCreator::ProcessMirrorDisplay();
         graphics->NewFrame();
         Layout_tick_UI(&flag);
+        // MCP：每帧 poll 一次命令队列（主线程执行，保证与 UMT 全局状态串行）
+        UmtMcp::CommandDispatcher::PollOnce();
         graphics->EndFrame();
     }
+
+    UmtMcp::CommandServer::Stop();
 
     if (gWorkerThread.joinable())
         gWorkerThread.join();
