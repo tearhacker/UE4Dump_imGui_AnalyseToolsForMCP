@@ -39,7 +39,7 @@ L0 会话层       进程枚举、目标选择、探针复用失效
 |---|---|---|---|
 | 进程枚举 | `std::vector<AutoProcessCandidate> FindAutoProcessCandidates()` | 枚举可分析的 UE 进程。两条来源：profile 的 `GetAppIDs()` 匹配 + 扫 `/proc` 判 maps 含 `libUE4.so`/`libUnreal.so` | 🔧 外迁（`executable.cpp:166-216`） |
 | 候选结构 | `struct AutoProcessCandidate { pid_t pid = 0; std::string package; std::string profileName; bool dedicated = false; }` | 返回元素（带默认值初始化） | ✅（`executable.cpp:64-70`） |
-| 刷新候选 | `RefreshCandidates()` | 重新枚举 | 🔧 外迁（`executable.cpp:352`） |
+| 刷新候选 | `RefreshCandidates()` | 重新枚举 | 🔧 外迁（`executable.cpp:345`） |
 | 探针失效 | `InvalidateProbeReuse()` | 切换进程时作废旧探针结果，做跨进程隔离 | 🔧 外迁（`executable.cpp:282-300`） |
 
 **8 个内置 profile**（类名，`executable.cpp:38-47`）：`ArenaBreakoutProfile` / `DeltaForceProfile` / `FarlightProfile` / `ShuishaProfile` / `ValorantProfile` / `NRCProfile` / `PUBGMHDProfile` / `PUBGProfile`
@@ -402,7 +402,9 @@ void UEDumper::Dump(std::unordered_map<std::string, BufferFmt> *outBuffersMap);
 | `SDK_Classes.hpp` | `:184-193` | 类（**可达几十 MB**，含虚表注释：VTableIndex / 槽位 / 函数 RVA，Dumper-7 风格成员偏移） |
 | `SDK_Offset.hpp` | `:184-193` | 偏移定义 |
 | `script.json` | `:200-213` | `Functions:[{Address,Name}]` + 作者声明（可直接喂 IDA/Ghidra 脚本） |
-| `libUE4.so` / `libUnreal.so` | `:931` | 转储的引擎库（可选） |
+| `libUE4.so` / `libUnreal.so` | `executable.cpp:931`（`kMgr.dumpMemELF`） | 转储的引擎库（可选） |
+
+> 除 `.json` 外，写盘时统一加作者 banner（`BuildDumpFileBanner` @ `executable.cpp:218`，在 `SaveDumpBuffers` `:397` 处逐文件调用）。
 
 > `scripts/ida.py` / `ghidra.py` / `ida_py3.py` 是仓库自带离线脚本（读 `script.json` 批量命名函数），**非运行时产物**。
 
@@ -412,18 +414,21 @@ void UEDumper::Dump(std::unordered_map<std::string, BufferFmt> *outBuffersMap);
 
 > ⚠️ 全部逻辑在 `:16-19` 的**内层匿名 namespace**，250 处 `ImGui::` 调用，状态全在文件级全局。
 > **不可直接复用**，需另起无头 `SDKQuery` 层（约 200–400 行）。
+>
+> 📌 **行号语义（二次审查澄清）**：下表行号均为**函数定义行号**（`Render*Panel()` 等），
+> 已逐条验证。UI 字符串在 `Render()` 主函数的调用点（`:1409-1446` 附近），两者不要混淆。
 
-| 能力 | 位置 | 作用 |
-|---|---|---|
-| 对象浏览器 | `:316-455` | 分页（PageSize 10–1000）、异步搜索带命中计数与进度、搜索/全部切换 |
-| 元数据 tab | `:922` | 对象 / 包 / 类 / 父类 / Size / 对齐 / ChildProperties 计数 / CDO / CastFlags / ClassFlags / StructFlags / 函数签名 |
-| **容器视图** | `:1246` | **Array / Set / Map 的 Num / Max / Data 并逐元素读值**（MaxRows 1–4096）← AI 分析数组结构最需要 |
-| **运行时视图** | `:1007` | **UWorld 的 PersistentLevel / OwningGameInstance / NetDriver + Actor 预览（`:875`）+ ULevel Actor 列表 + UDataTable RowStruct/RowMap** |
-| 属性 tab | `:458` | Address / VFTable / ClassPrivate / ObjectFlags / OuterPrivate / NamePrivate / InternalIndex / FullName / CppName |
-| 成员视图 | `:1106-1243` | 按地址 Inspect、Add Tag 收藏、Back 返回栈、字段表（Type/Name/Offset/Size/Value）、点 ObjectProperty 值**跳转下级对象** |
-| 值解析 | `:598` `ReadFieldValue` | 按属性类型读出实际值 |
-| 函数列表 | `:523` | Signature / Flags / Num / Size / Func / RVA / Owner，点击跳转 |
-| 声明构造 | `:795` `BuildPropertyDecl` / `:520` `BuildFunctionSignature` | 生成属性/函数的 C++ 声明文本（⚠️ 审查修正：`BuildFunctionSignature` 实际在 `:520`，早前文档误作 `:807`） |
+| 能力 | 函数 | 位置 | 作用 |
+|---|---|---|---|
+| 对象浏览器 | `RenderObjectBrowser()` | `:316-455` | 分页（PageSize 10–1000）、异步搜索带命中计数与进度、搜索/全部切换 |
+| 元数据 tab | `RenderMetadataPanel()` | `:922` | 对象 / 包 / 类 / 父类 / Size / 对齐 / ChildProperties 计数 / CDO / CastFlags / ClassFlags / StructFlags / 函数签名 |
+| **容器视图** | `RenderContainerView()` | `:1246` | **Array / Set / Map 的 Num / Max / Data 并逐元素读值**（MaxRows 1–4096）← AI 分析数组结构最需要 |
+| **运行时视图** | `RenderRuntimePanel()` | `:1007` | **UWorld 的 PersistentLevel / OwningGameInstance / NetDriver + Actor 预览（`RenderActorPreview()` `:875`）+ ULevel Actor 列表 + UDataTable RowStruct/RowMap** |
+| 属性 tab | `RenderPropertiesPanel()` | `:458` | Address / VFTable / ClassPrivate / ObjectFlags / OuterPrivate / NamePrivate / InternalIndex / FullName / CppName |
+| 成员视图 | `RenderInspectorPanel()` | `:1106-1243` | 按地址 Inspect、Add Tag 收藏、Back 返回栈、字段表（Type/Name/Offset/Size/Value）、点 ObjectProperty 值**跳转下级对象** |
+| 值解析 | `ReadFieldValue()` | `:598` | 按属性类型读出实际值 |
+| 函数列表 | `RenderFunctionsList()` | `:523` | Signature / Flags / Num / Size / Func / RVA / Owner，点击跳转 |
+| 声明构造 | `:795` `BuildPropertyDecl` / `BuildFunctionSignature`（声明 `:520`、定义 `:807`） | 生成属性/函数的 C++ 声明文本（⚠️ 二次审查修正：`:520` 是声明、`:807` 是定义，**两者都真实存在**，首次审查误判为"实际在 :520"） |
 | 字段收集 | `:720` `CollectFields`（**会递归父类**：`:724` `if (super) CollectFields(super, out, depth+1)`）/ `:770` `CountChildProperties` / `:757` `FindFieldRow` / `:120` `MatchNeedle` | 纯逻辑，可复用；`CollectFields` 递归性正好补上 `FindChildProp` 只查当前层的缺口 |
 | 虚拟键盘 | `:220` | 自绘输入法（MCP 不需要） |
 
