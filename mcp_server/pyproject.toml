@@ -1,0 +1,20 @@
+[project]
+name = "umt-mcp"
+version = "0.0.1"
+description = "PC-side MCP server for Alltear UMT (Android UE memory dumper). Blank scaffold."
+requires-python = ">=3.10"
+dependencies = [
+    # Pin v1.x: v2 renamed FastMCP → MCPServer and changed other APIs.
+    # See https://py.sdk.modelcontextprotocol.io/v2/migration/
+    "mcp>=1.0,<2",
+]
+
+[project.scripts]
+umt-mcp = "server:main"
+
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+py-modules = ["server"]
