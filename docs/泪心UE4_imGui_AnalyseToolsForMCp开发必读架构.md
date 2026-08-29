@@ -31,6 +31,31 @@
 
 ---
 
+## 0.1b v1.2 修订记录（架构级审查：性能 / token / 延迟 / 幻觉 / 安全）
+
+> 审查触发：用户要求对"架构设计、技术栈、性能、高 token、延迟、AI 乱答"做最严格复查。
+> 前三条是**事故级**，第 4 条是**安全漏洞**。
+
+| # | 问题 | 严重度 | 修正 |
+|---|---|---|---|
+| **1** | **单次响应无 token 上限**：`readMemory size≤65536` = hex 13 万字符 ≈ **33K token 一次响应**，可直接打爆上下文；`getLogs maxLines=200`≈6K；`scanCandidates maxCandidates=200`≈10K | 🔴 灾难 | **硬约束：单工具响应 ≤ 4K token**。`readMemory` size 上限砍到 4096；`getLogs` 默认 50；`maxCandidates` 默认 50；大响应一律分页 |
+| **2** | **慢工具无防护**：全内存扫描在 45.8 万对象游戏上分钟级，AI 只见调用挂起 → **重试风暴**（重扫 = 又几分钟，还翻倍占 worker） | 🔴 灾难 | ① 工具描述必须写**预期耗时档位**（快<1s / 中<30s / 慢<5min）；② 轮询响应带 `progress + etaSeconds + suggestedWaitMs`，AI 按建议等待；③ **长轮询**：`waitMs` 内未完成时设备端可 hold 连接至完成或上限，把 N 次空轮询压成 1 次 |
+| **3** | **AI 判定无证据内嵌**：scan 返回地址列表 → AI 挑一个 → 再调 sample → 三轮往返，且 AI 可能跳过采样直接"猜"最像的 | 🔴 幻觉高危 | `scanGNames`/`scanObjects` 返回**每个候选内嵌前 3 个名字样本** + `engineNameHits` 评分。扫描-采样-判定**三轮压一轮**，且证据强制在场，AI 想跳过都跳不过 |
+| **4** | **socket 未规定 bind 地址**：root 权限 + 无认证 + 内存写接口，若 bind 0.0.0.0 = **局域网任意设备可读写目标游戏内存** | 🔴 安全漏洞 | **强制 bind 127.0.0.1**，仅经 adb forward 暴露；PC 侧连 `127.0.0.1:27185`。HELLO 握手外加随机 token 校验（首次连接由 UMT 界面显示，PC 侧配置填入） |
+| **5** | **断线重连协议缺失**：USB 拔插 / adb 掉线 / UMT 被杀是**最高频故障**，架构只处理了设备进程崩溃（ESRCH） | 🔴 严重 | PC 侧 bridge：指数退避重连（1s/2s/4s/…上限 30s）；重连成功必**重新 HELLO**；**所有 sessionId 立即失效**；in-flight 调用返回 `isError: true` + `"连接已断开，已自动重连，请重试"` |
+| 6 | **outputSchema 的 token 成本漏算**：§1.7 只算 description（10K），每个 outputSchema 200–500 token × 42 = **另加 8–20K**，真实常驻 25–35K | 🟠 成本 | ① 描述瘦身：`<important_notes>` ≤5 条、总 ≤150 token；② **分组按需挂载**：核心 20 个常驻，F 组（ptrace）/E 组靠 `tools.listChanged` 动态加载；③ 上限 45 不变但**常驻 ≤25** |
+| 7 | **PC 并发与串行协议矛盾**：MCP 允许并行 tool calls，但设备协议是"发一收一"，架构只说 RLock 串行化——并行调用会排队且无请求匹配 | 🟠 延迟 | 明写：**协议为严格请求-响应串行**，PC 侧 RLock 必须；并行 tool calls 串行执行（正确但延迟叠加）。若将来要并行，协议加 `reqId` 匹配——v1 不做 |
+| 8 | **单 worker 阻塞一切**：gWorkerThread 单线程，分钟级扫描期间 getLogs/ping/getProbeStatus 全部排队 | 🟠 延迟 | 命令分级：**快速命令**（读日志/状态/小内存读）在命令线程直接执行；**重活**（扫描/转储）才进 worker。二者以 `DumpUiState` mutex 保护的数据为界 |
+| 9 | **缓存命中不可见**：AI 换参数重评可能拿到缓存结果而不自知，误以为"重扫过了" | 🟡 幻觉 | 缓存命中响应必须带 `cached: true` + 原始参数回显 |
+| 10 | **AI 结论不持久**：判定结果只存在对话里，新会话全重来（token 浪费 + 结果漂移） | 🟡 成本 | 新增**分析报告落盘**：验证通过的定位结论 + 证据写 `/sdcard/UnrealMemoryTools/<pkg>/mcp_analysis.json`，新会话先读它（复用 `readOutputFile`） |
+| 11 | `followPointerChain` 不支持数组步进 | 🟡 功能 | offsets 支持 `"[k]"` 后缀（如 `"0x38[0]"` = 解引用后取数组第 0 元素），真实链路 `LocalPlayers[0]` 需要 |
+| 12 | 设备端 JSON 库未指定 | 🟡 规范 | **定 nlohmann/json**（`deps/nlohmann/json.hpp` 已在仓库，Dumper 已用）；编译期开销可接受，禁止再造轮子 |
+| 13 | 轮询浪费 token：每轮 ~100-200 token，30 次轮询 = 6K 白烧 | 🟡 成本 | 由 #2 的长轮询解决；轮询响应必须带 `suggestedWaitMs` |
+
+**v1.2 保留 v1.1 全部决定**；本节只增补。工具数 42（§1.1 表格计数勘误：A2+B2+C11+D7+E2+F5+G8+H3+I2 = **42**，v1.1 标题"41"为笔误）。
+
+---
+
 ## 0.2 三句话总结
 
 1. **命名 camelCase**，描述用 `<use_case>` + `<important_notes>`，参数全部带默认值与校验。
@@ -41,7 +66,7 @@
 
 # 第一部分　工具设计规范
 
-## 1.1 工具清单（v1.1 定稿，41 个）
+## 1.1 工具清单（v1.2 定稿，42 个）
 
 > 命名 camelCase（依据最佳实践 1.1，GPT-4o tokenization 更省：`memoryRead` 2 token vs `memory_read` 3 token）
 
@@ -182,14 +207,21 @@ scanPattern — 按字节特征码（IDA 风格，支持 ? 通配）在目标进
 | `idempotentHint` | 扫描/取样类为 `true`；`startProbe`/`startDump` 为 `false` |
 | `openWorldHint: false` | **全部工具**。我们不访问外部网络 |
 
-## 1.7 工具总数与上下文预算（**v1.1 新增核算**）
+## 1.7 工具总数与上下文预算（**v1.2 重算**）
 
-41 个工具 × 约 250 token（含 use_case + important_notes）≈ **10K token** 常驻上下文。
-加 Instructions 约 0.8K、系统提示约 2K，**固定开销约 13K**。
+> v1.1 只算了 description（约 10K），漏算了 **outputSchema（每项 200–500 token × 42 = 另加 8–20K）**。
+> 真实常驻上下文 **25–35K token**（issue #6）。
 
-- **硬上限：45 个工具。** 超过必须先合并或删除，不许硬加
-- 若上下文吃紧，优先裁剪：E 组（`decodeAdrl` 可二期）、I 组（可二期）
-- 每次新增工具，在 PR 里写明"增加了多少常驻 token"
+**42 个工具**（v1.1 标题"41"为笔误，A2+B2+C11+D7+E2+F5+G8+H3+I2 = 42）。
+
+- **硬上限：45 个工具**（不变）
+- **常驻 ≤ 25 个**：核心 20 个常驻；F 组（ptrace）/ E 组（`decodeAdrl` 等 PC 侧重活）靠
+  `tools.listChanged` **动态加载**（设备端不支持 ptrace / 用户未启用时摘除）——不计入常驻预算（issue #6）
+- 描述瘦身：`<important_notes>` ≤ 5 条、总 ≤ 150 token；能用 `use_case` 说清的不写进 `description`
+- **🔴 单工具响应体积硬约束 ≤ 4K token**（issue #1）：`readMemory` size 上限 **4096**、
+  `getLogs` 默认 `maxLines=50`、`scanCandidates` 默认 `maxCandidates=50`；超阈值一律**分页**
+  （返回 `nextCursor`，AI 翻页而非一次拉全）。任何工具违反此约束视为 bug
+- 每次新增工具，在 PR 里写明"增加了多少常驻 token + 是否常驻"
 
 ## 1.8 参数规范（**v1.1 补齐**）
 
@@ -251,6 +283,32 @@ PC 侧与设备端是两个二进制，**换版后静默不兼容是真实风险
 用 MCP `notifications/message`（已在 capabilities 声明 `logging`），
 同时保留 `getLogs` 工具做兜底——**AI 看不到设备端失败原因就无法自我纠错**。
 
+### ❗修正 5：设备端 socket 必须 bind 127.0.0.1（**v1.2 安全，issue #4**）
+
+> UMT 以 root 运行、提供内存读写接口、**无认证**。bind 0.0.0.0 = 局域网任意设备可读写目标游戏内存。
+
+- **设备端 `CommandServer` 强制 `bind("127.0.0.1", 27185)`**，绝不监听 `0.0.0.0` / `INADDR_ANY`
+- 仅经 `adb forward tcp:27185 tcp:27185` 暴露；PC 侧 `ToolDispatcher` 连 `127.0.0.1:27185`
+- `HELLO` 握手**外加随机 token 校验**：首次连接由 UMT 界面显示一次性 token，PC 侧配置填入；
+  token 不符直接 `close()`
+- 端口号从 `27185` 提为可配置（避免与已运行实例冲突），但默认仍仅本地
+
+### ❗修正 6：断线重连协议（**v1.2，issue #5**）
+
+> USB 拔插 / adb 掉线 / UMT 被杀是**最高频故障**，v1.1 只处理了设备进程崩溃（ESRCH）。
+
+- PC 侧 `ToolDispatcher` 维护连接，断线后**指数退避重连**（1s / 2s / 4s / … 上限 30s）
+- 重连成功**必重新 `HELLO`**（含 token 校验与 `protocol` 校验）
+- 重连后**所有 `sessionId` 立即失效**（扫描候选集、类索引、job 全部作废），AI 须重建
+- 重连期间 in-flight 调用返回 `isError: true` + `"连接已断开，已自动重连，请重试"`
+- 设备端被杀重启后，旧会话数据不恢复——这是预期行为，文档写明
+
+### ❗修正 7：协议为严格请求-响应串行（**v1.2，issue #7**）
+
+- **设备协议是"发一收一"**，不是全双工。MCP 允许并行 tool calls，但 PC 侧 `ToolDispatcher`
+  必须用 `RLock` **串行化所有设备调用**（同 v1.1），并行 tool calls 会**排队顺序执行**（延迟叠加，但正确）
+- 若将来要真并行，协议加 `reqId` 字段做请求-响应匹配——**v1 不做**
+
 ## 2.2 抽象 Server 能力（最佳实践 3.1）
 
 ```
@@ -279,6 +337,11 @@ Transport (stdio)  可替换
 | 类索引 | pid + dump 版本 | 重新 dump |
 
 **`scanGNames` 换判据重评时不得重扫。**
+
+> 🔴 **缓存命中必须可见（v1.2，issue #9）**：任何返回缓存结果的响应必须带
+> `cached: true` + **原始参数回显**，否则 AI 会误以为"又扫了一遍"而做出错误判断。
+> 换判据/换参数重评时，若命中缓存，响应显式标注 `cached: true, params: {...}`，
+> 并提示"如需强制重扫传 `forceRefresh: true`"。
 
 ## 2.5 反汇编位置
 
@@ -416,6 +479,10 @@ MCP 2025-06-18 起支持 `outputSchema`。**每个有返回数据的工具都必
   这些是引擎内建名，所有 UE 游戏都一样。
 - 对象数组对不对，看前几个对象全名：必然包含 /Script/CoreUObject。
 - **永远用 sampleGNames / sampleObjects 取样本后自己判断，不要凭地址猜测。**
+- 🔴 **证据必须内嵌在场（v1.2，issue #3）**：`scanGNames` / `scanObjects` 的返回
+  已**内嵌每个候选的前 3 个名字样本 + `engineNameHits` 评分**，扫描-采样-判定三轮压成一轮。
+  **不要跳过内嵌样本另起一轮 sample**——那既浪费 token 又容易在采样前就猜错。
+  判定结论必须引用具体样本字符串，禁止只报"最可能的地址"。
 
 ## 硬性约束
 1. 长任务先同步等待；超过 waitMs 才返回 jobId，用 getProbeStatus 轮询。
@@ -430,6 +497,9 @@ MCP 2025-06-18 起支持 `outputSchema`。**每个有返回数据的工具都必
 6. 工具返回的都是原始观测值，判断权在你。
    工具说"命中数较低"不等于"不是"。
 7. 长任务可随时 cancelJob 取消。
+8. 🔴 **分析结论落盘（v1.2，issue #10）**：验证通过的定位结论 + 证据写入
+   `/sdcard/UnrealMemoryTools/<pkg>/mcp_analysis.json`。新会话/重连后**先 `readOutputFile`
+   读它**，避免重做整轮扫描和判定（省 token、防结果漂移）。未落盘的结论视为临时、不可信。
 
 ## 易错点
 - 不要假设偏移：偏移来自 dump 的真实数据，不是推理出来的。
@@ -452,6 +522,9 @@ MCP 2025-06-18 起支持 `outputSchema`。**每个有返回数据的工具都必
 PC 侧：`ToolDispatcher` 用 `RLock` 串行化（沿用源项目），
 但**长任务不占住锁**——立即返回 jobId 后在后台线程继续。
 
+> 协议层细节见 §2.1 修正 7：**设备协议严格请求-响应串行**，并行 tool calls 由 `RLock`
+> 排队顺序执行；不要假设设备端能并发处理多条命令。
+
 ## 4.2 ❗短等优先混合策略（**v1.1 修复**）
 
 v1.0 规定"长任务一律立即返回 jobId"，导致快速任务也要 2 次往返。
@@ -465,6 +538,17 @@ v1.0 规定"长任务一律立即返回 jobId"，导致快速任务也要 2 次�
 ```
 
 这一条直接省掉大量无用往返。
+
+> 🔴 **长轮询（v1.2，issue #2）**：设备端在 `waitMs` 窗口内**可 hold 连接不放**，
+> 把"N 次空轮询"压成"1 次带结果的返回"。即：超时不是立刻返 jobId，而是
+> 在连接上等到 `waitMs` 上限或任务完成，再返回。仅在任务接近完成时收益最大。
+>
+> 🔴 **每个工具描述必须标注预期耗时档位**（issue #2）：`快 <1s` / `中 <30s` / `慢 <5min`。
+> 慢工具 AI 才能正确选大 `waitMs`、不触发重试风暴。
+>
+> 🔴 **轮询响应必带 `progress + etaSeconds + suggestedWaitMs`**（issue #2/#13）：
+> AI 按 `suggestedWaitMs` 等待，避免盲目短轮询白烧 token（30 次 × 200 ≈ 6K）。
+> 轮询返回 `{ jobId, status, progress: 0.42, etaSeconds: 18, suggestedWaitMs: 15000 }`。
 
 ## 4.3 取消
 
@@ -521,6 +605,10 @@ PC 侧 ：Python 3.11+ / 官方 MCP SDK 的 FastMCP / capstone
 - **锁定版本**：MCP 协议一年迭代了 4 个版本，SDK churn 很快，`requirements.txt` 必须 pin
 - **传输抽象**：FastMCP 同一套工具定义可跑 stdio / HTTP，直接满足最佳实践 3.1（IoC）
 
+> 🔴 **设备端 JSON 库定 nlohmann/json（v1.2，issue #12）**：`deps/nlohmann/json.hpp`
+> 已在仓库（Dumper 已用），编译期 header-only 开销可接受。**禁止再造轮子**手写 JSON 解析——
+> 手写解析是 v1.0 安全/兼容问题的根因之一。所有命令服务收发 JSON 统一走它。
+
 ### ⚠️ 两个必须注意的坑
 
 **1. FastMCP 是 asyncio 的，我们的设备 I/O 是阻塞的**
@@ -537,7 +625,7 @@ result = self._client.call(command)
 
 **2. Pydantic 生成的 schema 必须与文档一致**
 
-41 个工具手写 `inputSchema`/`outputSchema` 极易与实现漂移。
+42 个工具手写 `inputSchema`/`outputSchema` 极易与实现漂移。
 用类型注解 + Pydantic 自动生成，再写单测**反过来校验文档里的 JSON Schema**。
 
 ### 骨架
@@ -619,6 +707,15 @@ async def start_probe(wait_ms: int = Field(default=5000, ge=0, le=60000)) -> dic
 | 模块 | 内容 | 预估行数 |
 |---|---|---|
 | 命令服务 | socket 监听 + `HELLO` 握手 + 协议收发 | 400 |
+
+> 🔴 **命令分级（v1.2，issue #8）**：`CommandServer` 收到命令后先分级——
+> **快速命令**（ping / getLogs / getProbeStatus / readMemory≤4096 / listProcesses）在
+> **命令线程直接执行**，不进 `gWorkerThread`；**重活**（scanGNames / scanObjects / dumpSDK /
+> callRemoteFunction）才投递 worker。否则分钟级扫描期间 ping/getLogs 全排队，AI 误判掉线。
+> 两类命令以 `DumpUiState` mutex 保护的数据为界，避免竞态。
+>
+> 🔴 **安全（v1.2，issue #4）**：命令服务 `bind("127.0.0.1")`，详见 §2.1 修正 5。
+> 绝不监听 `0.0.0.0`；HELLO 含随机 token 校验。
 | 命令队列与分发 | mutex + condition_variable + 分发表 | 250 |
 | 符号定位 | 按版本试 4 个引擎原生符号 + 解引用回减 | 150 |
 | **多锚点改造** | 改 `GetNamesPtr()`，用上 §2.3 那份名单 | 80 |
@@ -723,7 +820,7 @@ Andriod_UnrealMemoryTools/
 # 第六部分　落地检查清单
 
 ### 工具定义
-- [ ] 全部 camelCase，与 §1.1 一致（41 个，不超 45）
+- [ ] 全部 camelCase，与 §1.1 一致（42 个，不超 45）
 - [ ] 每个工具有中文 `title`
 - [ ] 描述含 `<use_case>` + `<important_notes>` + 中文同义词 + 下一步指引
 - [ ] **每个工具有 `outputSchema`** 且与 `structuredContent` 严格一致

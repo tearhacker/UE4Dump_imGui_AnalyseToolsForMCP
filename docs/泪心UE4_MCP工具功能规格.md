@@ -202,7 +202,7 @@
 ### `getLogs`
 **用途**：取回设备端日志（AI 自我纠错的关键入口）。
 
-**输入**：`sinceIndex?: integer = 0`, `maxLines?: integer = 200`（≤1500）
+**输入**：`sinceIndex?: integer = 0`, `maxLines?: integer = 50`（🔴 v1.2 默认砍到 50，上限 ≤1500；默认 200 会一次返回 ~6K token）
 
 **输出**：`{lines: [{index, level, timestamp, message}], totalLines}`
 
@@ -241,7 +241,7 @@
 ### `readMemory`
 **用途**：读取目标进程原始内存。
 
-**输入**：`address: string`（`0x...`）, `size: integer`（1–65536）
+**输入**：`address: string`（`0x...`）, `size: integer`（1–4096，🔴 v1.2 硬上限，超 4096 必须分页，否则单次响应 ~33K token 打爆上下文）
 
 **输出**：`{address, size, hex}`
 
@@ -462,6 +462,9 @@ maxCandidates?: integer = 200          // 1–2000
 - `anchorNames` 至少给 3 个引擎内建名——**单锚点误判率高，这是 AutoFix 失败主因**
 - 只返回候选摘要，**必须**用 `sampleGNames` 取样本后才能判定
 - 结果按 `sessionId` 缓存，换判据重评**不得重扫**
+- **自校验**（真实产物实证，见 `docs/SDK分析判定规则.md` §2）：解析成功后读对象数组下标 1 的名字，应为 `"Object"`；不符合则候选降级
+- FNamePool 解析参数（UE 4.22+ 实测值）：`Stride=2 / BlocksBit=16 / BlocksOff=0x40`，
+  Header 为 `uint16`（`bIsWide:1 | ProbeHash:5 | Len:10`），字符串在 Header 后 +2
 
 ---
 
@@ -477,6 +480,9 @@ maxCandidates?: integer = 200          // 1–2000
 **约束**：
 - **返回原始字符串，绝不替 AI 判定"是否有效"**——解出乱码也原样返回
 - `readErrors` 单独列出，让 AI 知道哪些没读出来
+- **条目粘连是真实存在的现象**（`com.tencent.letsgo` 实测：`GetNameByID(1)` 返回
+  `"neBytePropertyIntProperty"`——相邻条目被连读）。输出加 `suspectConcatenation: boolean`
+  标记疑似粘连的条目（含内建名子串但整体异常长的），**不要在设备端清洗**，AI 会判
 
 ---
 
@@ -593,9 +599,22 @@ maxCandidates?: integer = 200
 
 **输入**：`className: string`, `includeRuntimeSample?: boolean = false`
 
-**输出**：`{classInfo, unrecognizedFields: [{offset, size, hints}], suggestions?}`
+**输出**：
+```
+{ classInfo,
+  unrecognizedFields: [{offset, size, hints}],
+  fieldKinds: [{name, kind: "inline_struct" | "pointer" | "value"}],  // 内嵌 or 指针
+  conclusions: [{claim, grade: "A" | "B" | "C", evidence}] }
+```
 
 **实现基础**：⚠️ 新建编排层（依赖 G 组 `describeClass`）
+
+**约束**（来自真实游戏分析的两条铁律，详见 `docs/SDK分析判定规则.md`）：
+- **必须区分内嵌结构体与指针**（`UE_FStructProperty` vs `UE_FObjectPropertyBase` 类型信息已有）。
+  真实教训：把内嵌 `FMonsterAIParam AIParam` 当指针，读出来的全是错地址
+- **每条结论必须带可信度分级**：A = Dump 可直接证明（继承/类型/偏移/标记）；
+  B = 需多文件交叉证明（字段角色）；C = 必须运行时实测（是否参与最终计算）。
+  **禁止把 B/C 级推测写成事实**
 
 ---
 
@@ -607,7 +626,8 @@ maxCandidates?: integer = 200
 **输入**：
 ```
 baseAddress: string,
-offsets: string[],              // ["0x10","0x28",...]，支持负数
+offsets: string[],              // ["0x10","0x28",...]，支持负数；🔴 v1.2 支持数组步进后缀
+                                //   "0x38[0]" = 解引用后取该地址处数组的第 0 个元素（如 LocalPlayers[0]）
 derefEachStep?: boolean = true
 ```
 **输出**：`{steps: [{address, valueAtAddress, readable, module?}], finalValue, brokenAtStep?}`
