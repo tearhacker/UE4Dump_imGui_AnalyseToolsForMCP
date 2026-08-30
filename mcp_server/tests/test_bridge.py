@@ -310,6 +310,59 @@ def test_self_check_passes() -> None:
     assert tools.self_check() == []
 
 
+def test_param_extraction_and_device_table_agree() -> None:
+    """PC 侧下发的参数名必须落在设备端真正读取的键集合里。
+
+    这是真实踩过的坑：readMemoryValue 曾把 valueType 写成 type，
+    设备端永远按默认类型返回，不报错、看不出任何异常。
+    """
+    for fn in tools.TOOLS:
+        cmd_in_src, sent = tools._sent_params(fn)
+        if not cmd_in_src:
+            continue
+        cmd = tools._cmd(fn.__name__)
+        allowed = tools.DEVICE_PARAMS[cmd]
+        assert sent <= allowed, (
+            f"{fn.__name__} → {cmd} 下发了设备端不读的参数 {sorted(sent - allowed)}；"
+            f"该命令只接受 {sorted(allowed)}"
+        )
+
+
+def test_sent_params_extraction_is_accurate() -> None:
+    """_sent_params 本身要可靠，否则上面的守卫就是摆设。"""
+    cmd, sent = tools._sent_params(tools.read_memory_value)
+    assert cmd == "read_memory_value"
+    assert sent == {"address", "valueType"}
+
+    cmd, sent = tools._sent_params(tools.ping)
+    assert cmd == "ping"
+    assert sent == set()
+
+
+def test_dangerous_params_are_pc_side_only() -> None:
+    """confirmDangerous 在 writeMemory / allocScratch 上只是 PC 侧安全门。
+
+    设备端 WRITE_MEMORY / ALLOC_SCRATCH 并不读这个键，所以不能下发，
+    否则自检会报"下发了设备端不读的参数"。
+    """
+    assert "confirmDangerous" not in tools.DEVICE_PARAMS["WRITE_MEMORY"]
+    assert "confirmDangerous" not in tools.DEVICE_PARAMS["ALLOC_SCRATCH"]
+    # 但 F 组设备端自己有这道门，必须下发
+    assert "confirmDangerous" in tools.DEVICE_PARAMS["CALL_REMOTE_FUNCTION"]
+    assert "confirmDangerous" in tools.DEVICE_PARAMS["CALL_REMOTE_FUNCTION_BATCH"]
+
+
+def test_stateful_commands_require_select_process_first() -> None:
+    """ATTACH / START_PROBE 不收 pid —— 设备端从 SELECT_PROCESS 的选中项取目标。
+
+    这两条曾错误地带了 pid / waitMs 参数，传了也不会被读。
+    """
+    assert tools.DEVICE_PARAMS["ATTACH"] == frozenset()
+    assert tools.DEVICE_PARAMS["START_PROBE"] == frozenset()
+    assert tools.DEVICE_PARAMS["START_DUMP"] == frozenset()
+    assert tools.DEVICE_PARAMS["CANCEL_JOB"] == frozenset()
+
+
 def test_d_group_command_names_match_device() -> None:
     """D 组读/写语序是反的，最容易写错，单独钉住。"""
     assert tools._cmd("read_memory") == "MEMORY_READ"

@@ -124,18 +124,24 @@ def select_process(package: str, pid: int | None = None) -> str:
     return _dev("select_process", package=package, pid=pid)
 
 
-def attach(pid: int) -> str:
-    """直接按 pid attach（不走进程枚举）。selectProcess 失败时的退路。"""
-    return _dev("attach", pid=pid)
+def attach() -> str:
+    """对当前已选中的进程建立内存访问上下文。
+
+    🔴 不接受 pid —— 设备端从 SELECT_PROCESS 的选中项取目标，**必须先 selectProcess**。
+    """
+    return _dev("attach")
 
 
 # ============================================================ C 流程与产出
-def start_probe(wait_ms: int | None = None) -> str:
+def start_probe() -> str:
     """启动引擎探测（定位 GNames / GUObjectArray / 偏移表）。
 
-    这是几乎所有引擎语义命令的前置条件。耗时较长，之后用 getProbeStatus 轮询。
+    这是几乎所有引擎语义命令的前置条件。
+
+    🔴 必须先 selectProcess（设备端从选中项取目标）。
+    🔴 设备端不支持 waitMs 短等：本命令立即返回 started，需用 getProbeStatus 轮询。
     """
-    return _dev("start_probe", waitMs=wait_ms)
+    return _dev("start_probe")
 
 
 def get_probe_status() -> str:
@@ -148,12 +154,12 @@ def get_probe_results() -> str:
     return _dev("get_probe_results")
 
 
-def start_dump(wait_ms: int | None = None) -> str:
+def start_dump() -> str:
     """启动 SDK 转储。需先完成 startProbe。
 
     🔴 会先清空设备端输出目录（/sdcard/UnrealMemoryTools/<pkg>/）。
     """
-    return _dev("start_dump", waitMs=wait_ms)
+    return _dev("start_dump")
 
 
 def get_dump_status() -> str:
@@ -185,25 +191,28 @@ def get_logs(since_index: int | None = None, max_lines: int | None = None) -> st
     return _dev("get_logs", sinceIndex=since_index, maxLines=max_lines)
 
 
-def list_output_files() -> str:
+def list_output_files(package: str | None = None) -> str:
     """列出设备端 /sdcard/UnrealMemoryTools 下已产出的文件。
 
     🔴 大文件（SDK_Classes.hpp 等）要用 adb pull 拉，不要走 readOutputFile 整读。
     """
-    return _dev("list_output_files")
+    return _dev("list_output_files", package=package)
 
 
-def read_output_file(path: str, max_bytes: int | None = None) -> str:
+def read_output_file(filename: str, package: str | None = None) -> str:
     """读取设备端产物文件内容。
 
     🔴 只用于小文件；几十 MB 的 SDK 文件一律走 adb pull，禁止整读进上下文。
     """
-    return _dev("read_output_file", path=path, maxBytes=max_bytes)
+    return _dev("read_output_file", filename=filename, package=package)
 
 
-def cancel_job(job_id: str | None = None) -> str:
-    """取消正在跑的重活。不传 jobId 则取消当前活跃任务。"""
-    return _dev("cancel_job", jobId=job_id)
+def cancel_job() -> str:
+    """取消当前正在跑的重活。
+
+    🔴 设备端不接受 jobId —— 只能取消当前那一个任务。
+    """
+    return _dev("cancel_job")
 
 
 def apply_probe_overrides(overrides: dict[str, str]) -> str:
@@ -229,12 +238,12 @@ def read_memory_value(address: str, value_type: str) -> str:
 
     value_type: bool/i8/u8/i16/u16/i32/u32/i64/u64/f32/f64/ptr32/ptr64
     """
-    return _dev("read_memory_value", address=address, type=value_type)
+    return _dev("read_memory_value", address=address, valueType=value_type)
 
 
 def read_string(address: str, max_length: int | None = None, wide: bool | None = None) -> str:
     """读内存中的字符串。wide=true 按 UTF-16 读（FString）。"""
-    return _dev("read_string", address=address, maxLength=max_length, wide=wide)
+    return _dev("read_string", address=address, maxLen=max_length, isWide=wide)
 
 
 def write_memory(address: str, hex_bytes: str, confirm_dangerous: bool = False) -> str:
@@ -250,7 +259,7 @@ def write_memory(address: str, hex_bytes: str, confirm_dangerous: bool = False) 
             "2) 该区间可写（先 listModules 确认）\n"
             "写错会直接把游戏搞崩。"
         )
-    return _dev("write_memory", address=address, hex=hex_bytes, confirmDangerous=True)
+    return _dev("write_memory", address=address, hex=hex_bytes)
 
 
 def scan_pattern(pattern: str, module: str | None = None,
@@ -267,12 +276,12 @@ def list_modules() -> str:
     return _dev("list_modules")
 
 
-def resolve_symbol(symbol: str, module: str | None = None) -> str:
+def resolve_symbol(symbol: str) -> str:
     """按符号名解析地址。先查动态符号表，失败回退调试符号。
 
     🔴 strip 过的 ELF 查不到符号，此时应回退 scanPattern。
     """
-    return _dev("resolve_symbol", symbol=symbol, module=module)
+    return _dev("resolve_symbol", symbol=symbol)
 
 
 # ============================================================ E 理解层
@@ -325,7 +334,7 @@ def scan_objects() -> str:
 
 def search_classes(query: str, max_results: int | None = None) -> str:
     """按名字模糊搜索 UClass。支持子串匹配。"""
-    return _dev("search_classes", query=query, maxResults=max_results)
+    return _dev("search_classes", nameFilter=query, maxResults=max_results)
 
 
 def describe_class(class_name: str) -> str:
@@ -333,7 +342,7 @@ def describe_class(class_name: str) -> str:
 
     字段列表会递归父类，不是只看当前层。
     """
-    return _dev("describe_class", className=class_name)
+    return _dev("describe_class", name=class_name)
 
 
 def inspect_object(address: str) -> str:
@@ -359,7 +368,7 @@ def analyze_class(class_name: str) -> str:
 
 
 # ============================================================ I 复合操作
-def follow_pointer_chain(base_address: str, offsets: list[int]) -> str:
+def follow_pointer_chain(base_address: str, offsets: list[str]) -> str:
     """按偏移链逐级解引用：base → +off[0] → +off[1] → ...
 
     offsets 支持负数索引表示数组下标（如 -1 表示第 1 个元素）。
@@ -367,12 +376,14 @@ def follow_pointer_chain(base_address: str, offsets: list[int]) -> str:
     return _dev("follow_pointer_chain", baseAddress=base_address, offsets=offsets)
 
 
-def scan_candidates(max_candidates: int | None = None, brief: bool | None = None) -> str:
+def scan_candidates(region: str | None = None, alignment: int | None = None,
+                     max_candidates: int | None = None) -> str:
     """扫描并列出可分析的目标候选（进程 / 模块 / 关键地址）。
 
     brief=true 只返回统计与少量摘要，省 token。默认 50 条上限。
     """
-    return _dev("scan_candidates", maxCandidates=max_candidates, brief=brief)
+    return _dev("scan_candidates", region=region, alignment=alignment,
+                maxCandidates=max_candidates)
 
 
 # ============================================================ F 远程调用（ptrace）
@@ -390,23 +401,40 @@ def end_attach_session() -> str:
     return _dev("end_attach_session")
 
 
-def call_remote_function(address: str, arg_types: list[str] | None = None,
-                         args: list[Any] | None = None,
-                         return_type: str | None = None) -> str:
+def call_remote_function(session_id: str, address: str,
+                         args: list[str] | None = None,
+                         return_kind: str = "ptr",
+                         confirm_dangerous: bool = False) -> str:
     """在当前 ptrace 会话内远程调用一个函数（需先 begin_attach_session）。
 
-    args 元素支持两种形式：数字直接传值，"0x..." 字符串按地址处理。
+    session_id 来自 beginAttachSession 的返回值。
+    args 每个元素都是**字符串**："0x..." 按地址处理，"i:123" 按立即数处理。
     最多 8 个参数（aarch64 寄存器上限）。
-    """
-    return _dev("call_remote_function", address=address, argTypes=arg_types,
-                args=args, returnType=return_type)
-
-
-def call_remote_function_batch(calls: list[dict[str, Any]],
-                               confirm_dangerous: bool = False) -> str:
-    """批量远程调用函数（无状态，主推）。内部 attach → N 次调用 → detach。
+    return_kind: ptr / i32 / i64 / f32 / void
 
     🔴 危险操作，confirm_dangerous 必须为 true。
+    """
+    if not confirm_dangerous:
+        raise ToolError(
+            "远程调用会在目标进程内执行代码，必须显式传 confirm_dangerous=true。\n"
+            "调用前请先用 scanPattern / disassemble 验证函数地址。"
+        )
+    return _dev("call_remote_function", sessionId=session_id, address=address,
+                args=args, returnKind=return_kind, confirmDangerous=True)
+
+
+def call_remote_function_batch(address: str, arg_sets: list[list[str]],
+                               return_kind: str = "ptr",
+                               confirm_dangerous: bool = False) -> str:
+    """批量远程调用**同一个**函数（无状态，主推）。内部 attach → N 次调用 → detach。
+
+    address 是函数地址；arg_sets 是参数组的数组，**每组一次调用**：
+        arg_sets=[["i:0"], ["i:1"], ["i:2"]]  → 用 0/1/2 各调一次
+    元素格式同 callRemoteFunction："0x..." 地址，"i:123" 立即数。
+    return_kind: ptr / i32 / i64 / f32 / void
+
+    🔴 危险操作，confirm_dangerous 必须为 true。
+    🔴 与 attach 会话互斥：若已有活动会话，设备端会拒绝，需先 endAttachSession。
 
     返回陷阱靠 SIGSEGV/SIGILL 判定，无法区分"陷阱正常触发"与"被调函数自己崩了"
     —— 每个结果都附 rawHex，必须自行校验返回值是否合理。
@@ -414,9 +442,10 @@ def call_remote_function_batch(calls: list[dict[str, Any]],
     if not confirm_dangerous:
         raise ToolError(
             "远程调用会直接操控目标进程，必须显式传 confirm_dangerous=true。\n"
-            "调用前请确认函数地址与参数正确（先用 disassemble/resolveSymbol 验证）。"
+            "调用前请确认函数地址与参数正确（先用 scanPattern / disassemble 验证）。"
         )
-    return _dev("call_remote_function_batch", calls=calls, confirmDangerous=True)
+    return _dev("call_remote_function_batch", address=address, argSets=arg_sets,
+                returnKind=return_kind, confirmDangerous=True)
 
 
 def alloc_scratch(size: int, confirm_dangerous: bool = False) -> str:
@@ -426,7 +455,7 @@ def alloc_scratch(size: int, confirm_dangerous: bool = False) -> str:
     """
     if not confirm_dangerous:
         raise ToolError("在目标进程内分配内存需要显式传 confirm_dangerous=true。")
-    return _dev("alloc_scratch", size=size, confirmDangerous=True)
+    return _dev("alloc_scratch", size=size)
 
 
 # ---------------------------------------------------------------- 注册表
@@ -459,11 +488,75 @@ TOOLS: list[Any] = [
 ]
 
 
-def self_check() -> list[str]:
-    """启动自检：每个工具推导出的命令名必须真实存在。
+# 设备端每条命令**实际读取**的 args 键（从 src/executable.cpp 的 args.value() 提取）。
+# 空集合 = 该命令不接受任何参数，传了也白传。
+# 用途：启动时校验 PC 侧没把参数名写错——写错不会报错，只会静默走默认值。
+DEVICE_PARAMS: dict[str, frozenset[str]] = {
+    "PING": frozenset(),
+    "LIST_PROCESSES": frozenset({"dedicatedOnly"}),
+    "GET_LOGS": frozenset({"sinceIndex", "maxLines"}),
+    "GET_CAPABILITIES": frozenset(),
+    "MEMORY_READ": frozenset({"address", "size"}),
+    "MEMORY_READ_VALUE": frozenset({"address", "valueType"}),
+    "READ_STRING": frozenset({"address", "maxLen", "isWide"}),
+    "LIST_MODULES": frozenset({"nameFilter"}),
+    "DECODE_ADRL": frozenset({"address"}),
+    "WRITE_MEMORY": frozenset({"address", "hex"}),
+    "SCAN_PATTERN": frozenset({"pattern", "module", "start", "end", "maxResults"}),
+    "DISASSEMBLE": frozenset({"address", "count"}),
+    "BEGIN_ATTACH_SESSION": frozenset({"maxHoldMs"}),
+    "END_ATTACH_SESSION": frozenset({"sessionId"}),
+    "CALL_REMOTE_FUNCTION": frozenset(
+        {"confirmDangerous", "sessionId", "address", "args", "trapAddress", "returnKind"}),
+    "CALL_REMOTE_FUNCTION_BATCH": frozenset(
+        {"confirmDangerous", "address", "argSets", "returnKind", "maxHoldMs", "trapAddress"}),
+    "ALLOC_SCRATCH": frozenset({"size"}),
+    "SCAN_GNAMES": frozenset(),
+    "SAMPLE_GNAMES": frozenset({"startIndex", "count"}),
+    "SCAN_OBJECTS": frozenset(),
+    "SAMPLE_OBJECTS": frozenset({"startIndex", "count"}),
+    "SEARCH_CLASSES": frozenset({"nameFilter", "maxResults", "caseSensitive"}),
+    "DESCRIBE_CLASS": frozenset({"address", "name"}),
+    "INSPECT_OBJECT": frozenset({"address"}),
+    "RESOLVE_SYMBOL": frozenset({"symbol"}),
+    "FOLLOW_POINTER_CHAIN": frozenset({"baseAddress", "offsets"}),
+    "SELECT_PROCESS": frozenset({"pid", "package"}),
+    "ATTACH": frozenset(),
+    "START_PROBE": frozenset(),
+    "DETECT_UE_VERSION": frozenset(),
+    "START_DUMP": frozenset(),
+    "DUMP_UNREAL_LIBRARY": frozenset(),
+    "GET_PROBE_RESULTS": frozenset(),
+    "GET_PROBE_STATUS": frozenset(),
+    "GET_DUMP_STATUS": frozenset(),
+    "LOCATE_ENGINE_GLOBALS": frozenset({"waitMs"}),
+    "DUMP_SDK": frozenset({"waitMs"}),
+    "ANALYZE_CLASS": frozenset({"className", "includeRuntimeSample"}),
+    "SCAN_CANDIDATES": frozenset({"region", "alignment", "maxCandidates"}),
+    "LIST_OUTPUT_FILES": frozenset({"package"}),
+    "READ_OUTPUT_FILE": frozenset({"filename", "package"}),
+    "CANCEL_JOB": frozenset(),
+    "APPLY_PROBE_OVERRIDES": frozenset({"overrides"}),
+}
 
-    这是为了防止"工具名改了 / 设备端改名了 / camelCase 推导规则有边界情况"
-    这类问题留到真机上才以 E_UNKNOWN_CMD 的形式暴露。
+
+def _sent_params(func: Any) -> tuple[str, set[str]]:
+    """静态取出某个工具函数实际下发的 (命令名, 参数键名集合)。"""
+    import inspect
+    import re
+
+    src = inspect.getsource(func)
+    m = re.search(r'_dev\(\s*"([a-z_]+)"\s*(?:,\s*(.*?))?\)', src, re.S)
+    if not m:
+        return "", set()
+    return m.group(1), set(re.findall(r"(\w+)\s*=", m.group(2) or ""))
+
+def self_check() -> list[str]:
+    """启动自检，防两类静默失效。
+
+    1. 工具推导出的命令名必须真实存在 —— 否则真机上才爆 E_UNKNOWN_CMD
+    2. 下发的参数键名必须是设备端真正读取的 —— 否则**不报错，静默走默认值**
+       （例：把 valueType 写成 type，设备端永远按默认类型返回，查不出原因）
 
     返回问题列表，空列表表示通过。
     """
@@ -475,6 +568,20 @@ def self_check() -> list[str]:
         covered.add(cmd)
         if cmd not in DEVICE_COMMANDS:
             problems.append(f"工具 {fn.__name__!r} 推导出未知命令 {cmd!r}")
+            continue
+
+        cmd_in_src, sent = _sent_params(fn)
+        if cmd_in_src and cmd_in_src != fn.__name__:
+            problems.append(
+                f"工具 {fn.__name__!r} 调用的是 {cmd_in_src!r}，与函数名不一致")
+        allowed = DEVICE_PARAMS.get(cmd)
+        if allowed is None:
+            continue
+        unknown = sent - allowed
+        if unknown:
+            problems.append(
+                f"工具 {fn.__name__!r} → {cmd} 下发了设备端不读的参数 {sorted(unknown)}；"
+                f"该命令只接受 {sorted(allowed)}")
 
     missing = DEVICE_COMMANDS - covered
     if missing:
