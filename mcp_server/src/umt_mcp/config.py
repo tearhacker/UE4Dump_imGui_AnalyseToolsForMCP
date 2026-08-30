@@ -27,6 +27,15 @@ MAX_WAIT_MS = 60_000
 
 SOCKET_TIMEOUT = 60.0           # 单次命令 socket 读超时（秒）
 
+# ---------------------------------------------------------------- 帧与心跳（协议 §8.1）
+# 与设备端 src/mcp/Protocol.hpp 的数值保持一致，改任一端必须同步另一端
+MAX_FRAME_SIZE = 1024 * 1024    # 单帧上限 1MB（设备端 kMaxFrameSize）
+RECV_CHUNK_SIZE = 8192          # 单次 recv 字节数（设备端 kRecvChunkSize）
+HEARTBEAT_INTERVAL = 2.0        # 设备端心跳间隔（秒）
+HEARTBEAT_TIMEOUT = 10.0        # PC 侧判活阈值：超过即视为进程假死（约 5 个周期）
+CMD_TIMEOUT = 120.0             # 设备端单命令硬超时，PC 侧等待上限取此值
+STALE_CHECK_INTERVAL = 0.5      # 等待响应时检查心跳是否过期的时间片
+
 # ---------------------------------------------------------------- 响应体积（v1.2 issue #1）
 # 硬约束：单工具响应 <= 4K token，超出一律分页返回 nextCursor
 MAX_RESPONSE_TOKENS = 4_096
