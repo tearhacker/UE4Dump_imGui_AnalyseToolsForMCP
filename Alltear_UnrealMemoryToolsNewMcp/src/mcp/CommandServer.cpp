@@ -70,8 +70,9 @@ bool CommandServer::Start(uint16_t port, CommandQueue *queue, const std::string 
     token_ = GenerateToken();
     stopRequested_.store(false);
 
+    // 注：此处不 detach，由 Stop() 统一 join 回收，避免线程泄漏
+    // （见 Stop() 说明；单连接串行模型下关闭代价可控）。
     thread_ = std::thread(ServerLoop);
-    thread_.detach();
     return true;
 }
 
@@ -79,6 +80,14 @@ void CommandServer::Stop()
 {
     stopRequested_.store(true);
     running_.store(false);
+
+    // 干净回收服务端线程：ServerLoop 每轮都检查 stopRequested_，且 HandleFrame
+    // 的等待循环也已接入 stopRequested_，故 join 通常百毫秒内返回。
+    // 例外：若恰有命令在飞（主线程执行、最长 kCommandTimeoutSec），join 会等到
+    // 该命令响应或硬超时——这是单连接串行模型下可接受的关闭代价
+    // （见 docs/设备端命令服务设计.md §5）。
+    if (thread_.joinable())
+        thread_.join();
 }
 
 bool CommandServer::SendAll(int sock, const char *data, size_t len)
@@ -227,7 +236,8 @@ bool CommandServer::HandleFrame(int sock, const std::string &line, bool &authent
     time_t lastHeartbeat = std::time(nullptr);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(kCommandTimeoutSec);
 
-    while (std::chrono::steady_clock::now() < deadline)
+    // 接入 stopRequested_：关机/Stop() 时可即时中断等待，避免线程无法回收
+    while (std::chrono::steady_clock::now() < deadline && !stopRequested_.load())
     {
         CommandResponse resp;
         if (queue_->TryPopResponse(resp))

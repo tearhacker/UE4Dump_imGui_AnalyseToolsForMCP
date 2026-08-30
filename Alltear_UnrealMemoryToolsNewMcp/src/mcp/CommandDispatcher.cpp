@@ -92,12 +92,18 @@ bool CommandDispatcher::PollOnce()
         handler = it->second;
     }
 
-    // 执行（快命令当场执行；重活在后续版本投 gWorkerThread）
+    // 执行（快命令当场执行；重活由 START_* 命令的 handler 内部投 gWorkerThread 并短等）
     try
     {
         json data = handler(args);
         response["ok"] = true;
         response["data"] = data.is_null() ? json::object() : std::move(data);
+    }
+    catch (const HandlerError &e)
+    {
+        // 执行层错误：转 isError tool result（协议 §5 分层）
+        response["ok"] = false;
+        response["error"] = {{"code", e.code}, {"msg", e.what()}};
     }
     catch (const std::exception &e)
     {

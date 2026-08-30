@@ -31,13 +31,15 @@
    ↓
 PC 侧 connect
    ↓
-设备端主动发 HELLO（含一次性 token）
+设备端主动发 HELLO（仅协议/构建/能力，🔴 不含 token）
    ↓
-PC 校验 protocol + token   ──不符──> close()，不回任何消息
-   ↓ 通过
-正常请求-响应（严格串行，一问一答）
+PC 侧发 AUTH 帧（携带一次性 token）
    ↓
-断开 → PC 侧指数退避重连（1/2/4…≤30s）→ 重连后必重新 HELLO
+设备端校验 protocol + token   ──不符/不匹配──> 回 auth_fail 并 close()
+   ↓ 通过（回 auth_ok）
+正常请求-响应（严格串行，一问一答，🔴 未 AUTH 前任何命令返回 auth_required 并断开）
+   ↓
+断开 → PC 侧指数退避重连（1/2/4…≤30s）→ 重连后必重新 HELLO + AUTH
 ```
 
 🔴 **重连后所有 `sessionId` 立即失效**（扫描候选集、类索引、job 全部作废，架构 v1.2 issue #5）。
@@ -46,18 +48,46 @@ PC 校验 protocol + token   ──不符──> close()，不回任何消息
 
 ## 3. 消息格式
 
-### 3.1 HELLO（设备端 → PC，连接建立后立即发）
+### 3.1 HELLO（设备端 → PC，连接建立后立即发，🔴 不含 token）
 
 ```json
-{"type":"hello","protocol":1,"build":"1.0.0","token":"a3f9c2e1","capabilities":["PING","LIST_PROCESSES","GET_LOGS"]}
+{"type":"hello","protocol":1,"build":"1.0.0","capabilities":["PING","LIST_PROCESSES","GET_LOGS"]}
 ```
+
+> 🔴 **HELLO 不携带 token**：token 是一次性共享密钥，只在 `AUTH` 帧由 PC 侧提交、设备端校验。
+> 若 HELLO 把 token 广播出去，任何本地客户端连上即免费拿到密钥，鉴权形同虚设。
+> token 由设备端 `GenerateToken()` 在 `Start()` 时生成，用户从 UMT 界面/日志取得后填入 PC 侧配置。
 
 | 字段 | 含义 |
 |---|---|
 | `protocol` | 协议版本，当前 `1`。**不匹配 PC 侧必须明确报错并断开**，不让后续命令一路失败 |
 | `build` | UMT 构建版本，供 `getCapabilities` 暴露与排障 |
-| `token` | 首次连接由 UMT 界面显示的一次性随机 token，PC 侧配置填入 |
 | `capabilities` | 设备端当前支持的命令列表（ptrace 不可用时不含 F 组命令） |
+
+### 3.1.1 AUTH（PC → 设备端，HELLO 之后、首个命令之前必发）
+
+```json
+{"type":"auth","protocol":1,"token":"a3f9c2e1"}
+```
+
+| 字段 | 含义 |
+|---|---|
+| `protocol` | 协议版本，**必须与 HELLO 一致**，否则设备端回 `E_PROTOCOL_MISMATCH` 并断开 |
+| `token` | 用户从 UMT 界面/日志取得的一次性随机 token，PC 侧配置填入 |
+
+设备端校验通过 → 回 `auth_ok`：
+
+```json
+{"type":"auth_ok","protocol":1}
+```
+
+校验失败（token 不符 / 协议不匹配）→ 回 `auth_fail` 并断开连接：
+
+```json
+{"type":"auth_fail","error":{"code":"E_BAD_TOKEN","msg":"token 不匹配"}}
+```
+
+🔴 **未 AUTH 前**：设备端对任何非 `auth` 帧一律回 `auth_required` + `E_BAD_TOKEN` 并断开（安全红线，见 `CommandServer.cpp`）。
 
 ### 3.2 请求（PC → 设备端）
 
@@ -146,7 +176,7 @@ PC 校验 protocol + token   ──不符──> close()，不回任何消息
 
 | 错误码 | 含义 | PC 侧行为 |
 |---|---|---|
-| `E_PROTOCOL_MISMATCH` | HELLO 的 protocol 不匹配 | 断开，明确报错，不重试 |
+| `E_PROTOCOL_MISMATCH` | HELLO / AUTH 的 protocol 不匹配 | 断开，明确报错，不重试 |
 | `E_BAD_TOKEN` | token 校验失败 | 断开，提示用户在 UMT 界面取新 token |
 | `E_BAD_JSON` | JSON 解析失败 | 协议错误 |
 | `E_UNKNOWN_CMD` | 未知命令名 | 协议错误 |
@@ -158,6 +188,9 @@ PC 校验 protocol + token   ──不符──> close()，不回任何消息
 | `E_CANCELLED` | 任务被 `cancelJob` 取消 | 执行失败 |
 | `E_TIMEOUT` | 命令执行超过设备端硬超时上限 | 执行失败（**PC 侧视为"设备端可能异常"，触发心跳探活**） |
 | `E_INTERNAL` | 设备端内部异常 | 执行失败 |
+| `E_NOT_READY` | 前置条件未满足（如 probe 未完成、进程已切换需重 probe） | 执行失败 |
+| `E_NOT_FOUND` | 符号 / 资源 / 进程未找到 | 执行失败 |
+| `E_DECODE_FAILED` | 指令解码失败（如 ADRL 解码无目标地址） | 执行失败 |
 
 ### 错误分层（架构 §2.1 修正 2）
 
@@ -376,6 +409,10 @@ PC 校验 protocol + token   ──不符──> close()，不回任何消息
 // get_logs.response
 {"id":3,"ok":true,"data":{"lines":[{"index":0,"level":"E","timestamp":"","message":"[Bootstrap] 通用方式搜索 GUObject 失败"}],"totalLines":1}}
 
-// hello
-{"type":"hello","protocol":1,"build":"1.0.0","token":"a3f9c2e1","capabilities":["PING","LIST_PROCESSES","GET_LOGS"]}
+// hello（🔴 不含 token）
+{"type":"hello","protocol":1,"build":"1.0.0","capabilities":["PING","LIST_PROCESSES","GET_LOGS"]}
+// auth.request（HELLO 之后、首个命令之前必发）
+{"type":"auth","protocol":1,"token":"a3f9c2e1"}
+// auth.response（成功）
+{"type":"auth_ok","protocol":1}
 ```

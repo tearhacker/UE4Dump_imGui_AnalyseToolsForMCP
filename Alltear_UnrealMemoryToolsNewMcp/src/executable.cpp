@@ -11,6 +11,7 @@
 #include <sys/types.h>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 #include "Utils/Logger.hpp"
@@ -39,6 +40,7 @@
 #include "mcp/CommandQueue.hpp"
 #include "mcp/CommandServer.hpp"
 #include "mcp/Protocol.hpp"
+#include "mcp/MemoryHelpers.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -1078,6 +1080,435 @@ namespace
                                                 return {{"lines", lines}, {"totalLines", total}};
                                             },
                                             true);
+        // ── GET_CAPABILITIES
+        UmtMcp::CommandDispatcher::Register("GET_CAPABILITIES",
+            [](const json &) -> json
+            {
+                auto cmds = UmtMcp::CommandDispatcher::RegisteredCommands();
+                return {{"commands", cmds}, {"build", kUEDUMPER_VERSION}, {"protocol", UmtMcp::kProtocolVersion}};
+            }, true);
+
+        // ── MEMORY_READ
+        UmtMcp::CommandDispatcher::Register("MEMORY_READ",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                std::string addrStr = args.value("address", "");
+                uintptr_t addr = 0;
+                if (!UmtMcp::ParseAddress(addrStr, addr))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 格式无效: " + addrStr);
+                int size = args.value("size", 0);
+                if (size < 1 || size > 4096)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "size 须在 [1, 4096] 范围内");
+                std::vector<uint8_t> buf(static_cast<size_t>(size));
+                size_t bytesRead = UEMemory::kMgr.readMem(addr, buf.data(), static_cast<size_t>(size));
+                if (bytesRead != static_cast<size_t>(size))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kReadFailed,
+                        "读取失败: 请求 " + std::to_string(size) + " 字节, 实际 " + std::to_string(bytesRead));
+                return {{"address", UmtMcp::FormatAddress(addr)}, {"size", size},
+                        {"hex", UmtMcp::BytesToHex(buf.data(), static_cast<size_t>(size))}};
+            }, true);
+
+        // ── MEMORY_READ_VALUE
+        UmtMcp::CommandDispatcher::Register("MEMORY_READ_VALUE",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                std::string addrStr = args.value("address", "");
+                uintptr_t addr = 0;
+                if (!UmtMcp::ParseAddress(addrStr, addr))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 格式无效: " + addrStr);
+                std::string valueType = args.value("valueType", "");
+                size_t typeSize = UmtMcp::ValueTypeSize(valueType);
+                if (typeSize == 0)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "未知 valueType: " + valueType);
+                std::vector<uint8_t> buf(typeSize);
+                size_t bytesRead = UEMemory::kMgr.readMem(addr, buf.data(), typeSize);
+                if (bytesRead != typeSize)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kReadFailed,
+                        "读取失败: 请求 " + std::to_string(typeSize) + " 字节, 实际 " + std::to_string(bytesRead));
+                json value;
+                if (valueType == "bool") { value = (buf[0] != 0); }
+                else if (valueType == "i8") { value = static_cast<int8_t>(buf[0]); }
+                else if (valueType == "u8") { value = static_cast<uint8_t>(buf[0]); }
+                else if (valueType == "i16") { int16_t v=0; memcpy(&v,buf.data(),sizeof(v)); value=v; }
+                else if (valueType == "u16") { uint16_t v=0; memcpy(&v,buf.data(),sizeof(v)); value=v; }
+                else if (valueType == "i32") { int32_t v=0; memcpy(&v,buf.data(),sizeof(v)); value=v; }
+                else if (valueType == "u32") { uint32_t v=0; memcpy(&v,buf.data(),sizeof(v)); value=v; }
+                else if (valueType == "i64") { int64_t v=0; memcpy(&v,buf.data(),sizeof(v)); value=v; }
+                else if (valueType == "u64") { uint64_t v=0; memcpy(&v,buf.data(),sizeof(v)); value=v; }
+                else if (valueType == "f32") { float v=0.f; memcpy(&v,buf.data(),sizeof(v)); value=v; }
+                else if (valueType == "f64") { double v=0.; memcpy(&v,buf.data(),sizeof(v)); value=v; }
+                else if (valueType == "ptr32") { uint32_t v=0; memcpy(&v,buf.data(),sizeof(v)); value=UmtMcp::FormatAddress(static_cast<uintptr_t>(v)); }
+                else if (valueType == "ptr64") { uintptr_t v=0; memcpy(&v,buf.data(),sizeof(v)); value=UmtMcp::FormatAddress(v); }
+                return {{"address", UmtMcp::FormatAddress(addr)}, {"valueType", valueType},
+                        {"value", value}, {"rawHex", UmtMcp::BytesToHex(buf.data(), typeSize)}};
+            }, true);
+
+        // ── READ_STRING
+        UmtMcp::CommandDispatcher::Register("READ_STRING",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                std::string addrStr = args.value("address", "");
+                uintptr_t addr = 0;
+                if (!UmtMcp::ParseAddress(addrStr, addr))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 格式无效: " + addrStr);
+                int maxLen = args.value("maxLen", 256);
+                if (maxLen < 1 || maxLen > 4096)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "maxLen 须在 [1, 4096] 范围内");
+                bool isWide = args.value("isWide", false);
+                std::string result;
+                bool truncated = false;
+                if (isWide)
+                {
+                    std::vector<wchar_t> wbuf(static_cast<size_t>(maxLen) + 1);
+                    size_t read = UEMemory::kMgr.readMem(addr, wbuf.data(), static_cast<size_t>(maxLen) * sizeof(wchar_t));
+                    if (read != static_cast<size_t>(maxLen) * sizeof(wchar_t))
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kReadFailed, "宽字符串读取失败");
+                    wbuf[static_cast<size_t>(maxLen)] = L'\0';
+                    std::wstring ws(wbuf.data());
+                    truncated = (ws.size() == static_cast<size_t>(maxLen));
+                    result = UmtMcp::WstringToUtf8(ws);
+                }
+                else
+                {
+                    std::vector<char> cbuf(static_cast<size_t>(maxLen) + 1);
+                    size_t read = UEMemory::kMgr.readMem(addr, cbuf.data(), static_cast<size_t>(maxLen));
+                    if (read != static_cast<size_t>(maxLen))
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kReadFailed, "字符串读取失败");
+                    cbuf[static_cast<size_t>(maxLen)] = '\0';
+                    std::string s(cbuf.data());
+                    truncated = (s.size() == static_cast<size_t>(maxLen));
+                    result = s;
+                }
+                return {{"address", UmtMcp::FormatAddress(addr)}, {"value", result},
+                        {"isWide", isWide}, {"truncated", truncated}};
+            }, true);
+
+        // ── LIST_MODULES
+        UmtMcp::CommandDispatcher::Register("LIST_MODULES",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                std::string nameFilter = args.value("nameFilter", "");
+                auto maps = KittyMemoryEx::getAllMaps(UEMemory::kMgr.processID());
+                json modules = json::array();
+                std::unordered_set<std::string> seen;
+                for (auto &m : maps)
+                {
+                    if (m.pathname.empty()) continue;
+                    if (!nameFilter.empty())
+                    {
+                        std::string pn = m.pathname;
+                        std::string nf = nameFilter;
+                        std::transform(pn.begin(), pn.end(), pn.begin(), ::tolower);
+                        std::transform(nf.begin(), nf.end(), nf.begin(), ::tolower);
+                        if (pn.find(nf) == std::string::npos) continue;
+                    }
+                    if (seen.count(m.pathname)) continue;
+                    seen.insert(m.pathname);
+                    modules.push_back({{"name", m.pathname},
+                        {"baseAddress", UmtMcp::FormatAddress(m.startAddress)},
+                        {"endAddress", UmtMcp::FormatAddress(m.endAddress)},
+                        {"permissions", UmtMcp::FormatPermissions(m.readable, m.writeable, m.executable)}});
+                }
+                return {{"modules", modules}, {"count", modules.size()}};
+            }, true);
+
+        // ── DECODE_ADRL
+        UmtMcp::CommandDispatcher::Register("DECODE_ADRL",
+            [](const json &args) -> json
+            {
+                std::string addrStr = args.value("address", "");
+                uintptr_t addr = 0;
+                if (!UmtMcp::ParseAddress(addrStr, addr))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 格式无效: " + addrStr);
+                uintptr_t target = UEMemory::Arm64::DecodeADRL(addr);
+                if (target == 0)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kDecodeFailed, "ADRL 解码失败, 地址: " + addrStr);
+                return {{"instructionAddress", UmtMcp::FormatAddress(addr)},
+                        {"targetAddress", UmtMcp::FormatAddress(target)}};
+            }, true);
+
+        // ── RESOLVE_SYMBOL
+        UmtMcp::CommandDispatcher::Register("RESOLVE_SYMBOL",
+            [](const json &args) -> json
+            {
+                if (!gProbeResult.valid || !gProbeResult.success)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "Probe 未完成或失败, 无法解析符号");
+                std::string symbolName = args.value("symbol", "");
+                if (symbolName.empty())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "symbol 不能为空");
+                uintptr_t addr = 0;
+                std::string source;
+                auto elf = gProbeResult.profile->GetUnrealELF();
+                // 第一级: findSymbol 精确匹配
+                addr = elf.findSymbol(symbolName);
+                if (addr != 0) { source = "findSymbol"; }
+                else
+                {
+                    // 第二级: findDebugSymbol
+                    addr = elf.findDebugSymbol(symbolName);
+                    if (addr != 0) { source = "findDebugSymbol"; }
+                    else
+                    {
+                        // 第三级: symbols() 模糊匹配 (包含子串)
+                        auto syms = elf.symbols();
+                        for (auto &[name, a] : syms)
+                        {
+                            if (name.find(symbolName) != std::string::npos)
+                            { addr = a; source = "symbols(fuzzy:" + name + ")"; break; }
+                        }
+                        if (addr == 0)
+                        {
+                            auto dsyms = elf.dsymbols();
+                            for (auto &[name, a] : dsyms)
+                            {
+                                if (name.find(symbolName) != std::string::npos)
+                                { addr = a; source = "dsymbols(fuzzy:" + name + ")"; break; }
+                            }
+                        }
+                    }
+                }
+                if (addr == 0)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound,
+                        "符号未找到: " + symbolName);
+                // 查找所属模块
+                std::string moduleName;
+                auto maps = KittyMemoryEx::getAllMaps(UEMemory::kMgr.processID());
+                auto region = KittyMemoryEx::getAddressMap(maps, addr);
+                if (!region.pathname.empty()) moduleName = region.pathname;
+                return {{"symbol", symbolName}, {"address", UmtMcp::FormatAddress(addr)},
+                        {"source", source}, {"module", moduleName}};
+            }, true);
+
+        // ── FOLLOW_POINTER_CHAIN
+        UmtMcp::CommandDispatcher::Register("FOLLOW_POINTER_CHAIN",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                std::string baseStr = args.value("baseAddress", "");
+                uintptr_t baseAddr = 0;
+                if (!UmtMcp::ParseAddress(baseStr, baseAddr))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "baseAddress 格式无效: " + baseStr);
+                auto offsets = args.value("offsets", json::array());
+                if (offsets.empty())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "offsets 不能为空");
+                // 缓存 maps 用于模块归属查询
+                auto maps = KittyMemoryEx::getAllMaps(UEMemory::kMgr.processID());
+                // 第一步: baseAddress 是存储根指针的地址, 需先解引用
+                uintptr_t current = 0;
+                size_t ptrSize = sizeof(uintptr_t);
+                size_t read = UEMemory::kMgr.readMem(baseAddr, &current, ptrSize);
+                if (read != ptrSize)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kReadFailed,
+                        "baseAddress 解引用失败: " + baseStr);
+                json steps = json::array();
+                steps.push_back({{"step", 0}, {"address", UmtMcp::FormatAddress(baseAddr)},
+                    {"value", UmtMcp::FormatAddress(current)}, {"action", "deref_base"}});
+                // 逐步跟踪偏移链
+                for (size_t i = 0; i < offsets.size(); i++)
+                {
+                    std::string offStr = offsets[i].get<std::string>();
+                    UmtMcp::ParsedOffset po;
+                    if (!UmtMcp::ParseOffset(offStr, po))
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs,
+                            "offset 格式无效: " + offStr);
+                    // 加偏移
+                    uintptr_t addr = current + static_cast<uintptr_t>(po.offset);
+                    // 数组步进
+                    if (po.arrayIndex >= 0)
+                        addr += static_cast<uintptr_t>(po.arrayIndex) * ptrSize;
+                    // 读取下一级指针
+                    uintptr_t next = 0;
+                    read = UEMemory::kMgr.readMem(addr, &next, ptrSize);
+                    if (read != ptrSize)
+                    {
+                        // 链断裂
+                        auto region = KittyMemoryEx::getAddressMap(maps, addr);
+                        steps.push_back({{"step", i + 1}, {"address", UmtMcp::FormatAddress(addr)},
+                            {"offset", offStr}, {"error", "读取失败"},
+                            {"module", region.pathname}});
+                        return {{"baseAddress", UmtMcp::FormatAddress(baseAddr)},
+                            {"steps", steps}, {"brokenAtStep", i + 1},
+                            {"finalAddress", nullptr}};
+                    }
+                    // 指针有效性检查
+                    bool valid = (next != 0);
+                    auto reg = KittyMemoryEx::getAddressMap(maps, next);
+                    steps.push_back({{"step", i + 1}, {"address", UmtMcp::FormatAddress(addr)},
+                        {"offset", offStr}, {"value", UmtMcp::FormatAddress(next)},
+                        {"valid", valid}, {"module", reg.pathname}});
+                    current = next;
+                }
+                auto finalRegion = KittyMemoryEx::getAddressMap(maps, current);
+                return {{"baseAddress", UmtMcp::FormatAddress(baseAddr)},
+                    {"steps", steps}, {"brokenAtStep", nullptr},
+                    {"finalAddress", UmtMcp::FormatAddress(current)},
+                    {"finalModule", finalRegion.pathname}};
+            }, true);
+
+        // ── SELECT_PROCESS（状态入口：选目标进程，为 ATTACH/PROBE 准备）
+        UmtMcp::CommandDispatcher::Register("SELECT_PROCESS",
+            [](const json &args) -> json
+            {
+                RefreshCandidates();
+                const int targetPid = args.value("pid", 0);
+                const std::string targetPkg = args.value("package", "");
+                int found = -1;
+                if (targetPid > 0)
+                {
+                    for (size_t i = 0; i < gCandidates.size(); ++i)
+                        if (gCandidates[i].pid == targetPid) { found = static_cast<int>(i); break; }
+                }
+                else if (!targetPkg.empty())
+                {
+                    for (size_t i = 0; i < gCandidates.size(); ++i)
+                        if (gCandidates[i].package == targetPkg) { found = static_cast<int>(i); break; }
+                }
+                else if (!gCandidates.empty())
+                {
+                    found = 0;
+                }
+                if (found < 0)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound,
+                        "未找到匹配的目标进程，请先确认设备上有 UE 进程在运行");
+                gSelectedIndex = found;
+                const auto &c = gCandidates[found];
+                InvalidateProbeReuse("已切换目标进程，清除旧探针结果");
+                gProbeResult.pid = c.pid;
+                gProbeResult.package = c.package;
+                gProbeResult.profileName = c.profileName;
+                gProbeResult.dedicated = c.dedicated;
+                gProbeResult.valid = false;
+                gProbeResult.success = false;
+                return {{"selectedIndex", found}, {"pid", c.pid}, {"package", c.package},
+                        {"profileName", c.profileName}, {"dedicated", c.dedicated}};
+            }, false);
+
+        // ── ATTACH（状态入口：将 KittyMemoryMgr 附着到选中进程；PROBE 也会重做，此处供分步校验）
+        UmtMcp::CommandDispatcher::Register("ATTACH",
+            [](const json &) -> json
+            {
+                if (gSelectedIndex < 0 || gSelectedIndex >= static_cast<int>(gCandidates.size()))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "请先 SELECT_PROCESS 选定目标进程");
+                const auto &c = gCandidates[gSelectedIndex];
+                const bool ok = UEMemory::kMgr.initialize(c.pid, EK_MEM_OP_SYSCALL, false) ||
+                                UEMemory::kMgr.initialize(c.pid, EK_MEM_OP_IO, false);
+                return {{"attached", ok}, {"pid", c.pid},
+                        {"isMemValid", UEMemory::kMgr.isMemValid()}};
+            }, false);
+
+        // ── START_PROBE（状态入口：触发完整探针，重活投 worker 线程，用 GET_PROBE_STATUS 轮询）
+        //    命令名严格对齐 docs/mcp-protocol.md §6（startProbe → START_PROBE）
+        UmtMcp::CommandDispatcher::Register("START_PROBE",
+            [](const json &) -> json
+            {
+                if (gSelectedIndex < 0 || gSelectedIndex >= static_cast<int>(gCandidates.size()))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "请先 SELECT_PROCESS 选定目标进程");
+                StartProbeSelected();
+                return {{"started", true}, {"phase", "probing"}};
+            }, false);
+
+        // ── DETECT_UE_VERSION（状态入口：读探针结果推断 UE 版本 / 基址 / profile）
+        UmtMcp::CommandDispatcher::Register("DETECT_UE_VERSION",
+            [](const json &) -> json
+            {
+                if (!gProbeResult.valid)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "请先 START_PROBE 完成探针流程");
+                const std::string pn = gProbeResult.profileName;
+                std::string ue = "unknown";
+                if (pn.find("UE5") != std::string::npos) ue = "UE5";
+                else if (pn.find("UE4") != std::string::npos) ue = "UE4";
+                return {{"profileName", pn},
+                        {"baseAddress", UmtMcp::FormatAddress(gProbeResult.baseAddress)},
+                        {"ueVersion", ue},
+                        {"appName", gProbeResult.profile ? gProbeResult.profile->GetAppName() : std::string()}};
+            }, true);
+
+        // ── START_DUMP（业务工具：触发完整 dump，重活投 worker，用 GET_DUMP_STATUS 轮询）
+        UmtMcp::CommandDispatcher::Register("START_DUMP",
+            [](const json &) -> json
+            {
+                if (gSelectedIndex < 0 || gSelectedIndex >= static_cast<int>(gCandidates.size()))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "请先 SELECT_PROCESS 选定目标进程");
+                if (!gProbeResult.valid || !gProbeResult.success)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "请先 START_PROBE 完成探针流程");
+                StartDumpAfterProbe();
+                return {{"started", true}};
+            }, false);
+
+        // ── DUMP_UNREAL_LIBRARY（业务工具：转储 libUE4.so / libUnreal.so）
+        UmtMcp::CommandDispatcher::Register("DUMP_UNREAL_LIBRARY",
+            [](const json &) -> json
+            {
+                if (gSelectedIndex < 0 || gSelectedIndex >= static_cast<int>(gCandidates.size()))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "请先 SELECT_PROCESS 选定目标进程");
+                if (!gProbeResult.valid || !gProbeResult.success)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "请先 START_PROBE 完成探针流程");
+                StartDumpUnrealLib();
+                return {{"started", true}};
+            }, false);
+
+        // ── GET_PROBE_RESULTS（业务工具：返回探针识别的核心偏移与结构体布局）
+        UmtMcp::CommandDispatcher::Register("GET_PROBE_RESULTS",
+            [](const json &) -> json
+            {
+                if (!gProbeResult.valid)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "请先 START_PROBE 完成探针流程");
+                json offsets = json::array();
+                for (const auto &e : gProbeResult.offsets)
+                    offsets.push_back({{"name", e.name},
+                                       {"value", UmtMcp::FormatAddress(e.value)},
+                                       {"relative", UmtMcp::FormatAddress(e.relative)},
+                                       {"found", e.found}});
+                json groups = json::array();
+                for (const auto &g : gProbeResult.structGroups)
+                {
+                    json fields = json::array();
+                    for (const auto &f : g.fields)
+                        fields.push_back({{"name", f.name}, {"type", f.type},
+                                          {"offset", UmtMcp::FormatAddress(f.offset)},
+                                          {"found", f.found}, {"description", f.description}});
+                    groups.push_back({{"name", g.name}, {"fields", fields}});
+                }
+                return {{"offsets", offsets}, {"structGroups", groups}};
+            }, true);
+
+        // ── GET_PROBE_STATUS（业务工具：探针进度/状态，持 mutex 读 DumpUiState）
+        UmtMcp::CommandDispatcher::Register("GET_PROBE_STATUS",
+            [](const json &) -> json
+            {
+                std::lock_guard<std::mutex> lock(gDumpUiState.mutex);
+                return {{"phase", gDumpUiState.phase},
+                        {"objectsPercent", gDumpUiState.objectsPercent},
+                        {"running", gDumpUiState.probeRunning},
+                        {"finished", gDumpUiState.probeFinished},
+                        {"success", gDumpUiState.probeSuccess}};
+            }, true);
+
+        // ── GET_DUMP_STATUS（业务工具：dump / soDump 进度与产物路径，持 mutex 读 DumpUiState）
+        UmtMcp::CommandDispatcher::Register("GET_DUMP_STATUS",
+            [](const json &) -> json
+            {
+                std::lock_guard<std::mutex> lock(gDumpUiState.mutex);
+                return {{"phase", gDumpUiState.phase},
+                        {"dumpPercent", gDumpUiState.dumpPercent},
+                        {"running", gDumpUiState.dumpRunning},
+                        {"finished", gDumpUiState.dumpFinished},
+                        {"success", gDumpUiState.dumpSuccess},
+                        {"resultPath", gDumpUiState.resultPath},
+                        {"soDumpRunning", gDumpUiState.soDumpRunning},
+                        {"soDumpFinished", gDumpUiState.soDumpFinished},
+                        {"soDumpSuccess", gDumpUiState.soDumpSuccess},
+                        {"soDumpPath", gDumpUiState.soDumpPath}};
+            }, true);
     }
 } // namespace
 

@@ -5,6 +5,8 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <stdexcept>
+#include <string>
 
 namespace UmtMcp
 {
@@ -37,6 +39,34 @@ inline const char *const kUnknownCmd = "E_UNKNOWN_CMD";
 inline const char *const kBadArgs = "E_BAD_ARGS";
 inline const char *const kTimeout = "E_TIMEOUT";
 inline const char *const kInternal = "E_INTERNAL";
+
+        // 执行层错误码：以 isError tool result 返回，非 JSON-RPC error（协议 §5 分层）
+    inline const char *const kNotAttached = "E_NOT_ATTACHED";  // 未 attach / kMgr 未初始化
+    inline const char *const kReadFailed = "E_READ_FAILED";
+    inline const char *const kWriteFailed = "E_WRITE_FAILED";
+    inline const char *const kProbeFailed = "E_PROBE_FAILED";
+    inline const char *const kNotReady = "E_NOT_READY";      // 前置条件未满足（如 probe 未完成）
+    inline const char *const kNotFound = "E_NOT_FOUND";      // 符号/资源未找到
+    inline const char *const kDecodeFailed = "E_DECODE_FAILED"; // 指令解码失败
+    inline const char *const kCancelled = "E_CANCELLED";
 }  // namespace Err
+
+// ------------------------------------------------ 返回值约定（协议 §5，唯一对齐事实）
+// 所有经 CommandDispatcher 执行的命令，响应帧统一形如（一行 NDJSON）：
+//
+//   成功：  {"id":<N>, "ok":true,  "data":{ ... }}      // data 缺省为 {}
+//   执行层错误（isError tool result）：
+//          {"id":<N>, "ok":false, "error":{"code":<ERR>, "msg":<文本> [, "detail":{...}]}}
+//
+// 分层原则：
+//   - 协议层错误（握手/auth/帧格式）由 CommandServer 直接回，带 "type" 字段，未必带 id；
+//   - 执行层错误（命令逻辑）由 handler 抛 HandlerError(code, msg)，Dispatcher 捕获后
+//     包成上面的 ok:false 帧。code 必须取自 Err 命名空间，禁止 handler 现场造字符串。
+//   - 耗时档位 / 长任务 / brief 分级 / cursor 分页 等高级约定尚未落地（见 MemoryHelpers.hpp TODO）。
+struct HandlerError : public std::runtime_error
+{
+    std::string code;
+    HandlerError(const char *errCode, const std::string &msg) : std::runtime_error(msg), code(errCode) {}
+};
 
 }  // namespace UmtMcp
