@@ -153,6 +153,82 @@ namespace
     int gSelectedIndex = 0;
     std::thread gWorkerThread;
     ProbeResult gProbeResult;
+    volatile bool gCancelRequested = false;
+    static std::mutex gOverrideMutex;
+    static std::unordered_map<std::string, uintptr_t> gProbeOverrides;
+
+    // ── JobRegistry:支持 CANCEL_JOB 和 jobId 轮询(轻量实现)
+    struct JobEntry
+    {
+        std::string jobId;
+        std::string type; // "probe" / "dump"
+        std::chrono::steady_clock::time_point createdAt;
+        bool running = false;
+        int progress = 0;
+        std::string lastError;
+    };
+    static std::mutex gJobMutex;
+    static std::vector<JobEntry> gJobs;
+    static std::string genJobId()
+    {
+        static std::atomic<uint64_t> sJobSeq{0};
+        return "job_" + std::to_string(++sJobSeq) + "_" +
+               std::to_string(static_cast<uint32_t>(
+                   std::chrono::duration_cast<std::chrono::seconds>(
+                       std::chrono::system_clock::now().time_since_epoch()).count()));
+    }
+    static std::string StartJob(const std::string &type)
+    {
+        std::lock_guard<std::mutex> lock(gJobMutex);
+        JobEntry j;
+        j.jobId = genJobId();
+        j.type = type;
+        j.running = true;
+        j.createdAt = std::chrono::steady_clock::now();
+        gJobs.push_back(j);
+        return j.jobId;
+    }
+    static void FinishJob(const std::string &jobId, bool success, const std::string &error = {})
+    {
+        std::lock_guard<std::mutex> lock(gJobMutex);
+        for (auto &j : gJobs)
+        {
+            if (j.jobId == jobId)
+            {
+                j.running = false;
+                j.progress = success ? 100 : 0;
+                j.lastError = error;
+                break;
+            }
+        }
+    }
+    static void UpdateJobProgress(const std::string &jobId, int pct)
+    {
+        std::lock_guard<std::mutex> lock(gJobMutex);
+        for (auto &j : gJobs)
+            if (j.jobId == jobId) { j.progress = pct; break; }
+    }
+
+    // ── 目录列表辅助(用 readdir,与 FindAutoProcessCandidates 风格一致)
+    static std::vector<nlohmann::json> ListDirectory(const std::string &path)
+    {
+        std::vector<nlohmann::json> files;
+        DIR *dir = opendir(path.c_str());
+        if (!dir) return files;
+        dirent *entry = nullptr;
+        while ((entry = readdir(dir)) != nullptr)
+        {
+            nlohmann::json f;
+            f["name"] = entry->d_name;
+            f["type"] = (entry->d_type == DT_DIR) ? "directory" : "file";
+            files.push_back(f);
+        }
+        closedir(dir);
+        std::sort(files.begin(), files.end(),
+                  [](const nlohmann::json &a, const nlohmann::json &b)
+                  { return a["name"].get<std::string>() < b["name"].get<std::string>(); });
+        return files;
+    }
 
     bool IsNumericName(const char *s)
     {
@@ -742,8 +818,36 @@ namespace
             return;
         }
 
+        // 应用用户注入的偏移覆盖(APPLY_PROBE_OVERRIDES)
+        {
+            std::lock_guard<std::mutex> lock(gOverrideMutex);
+            if (!gProbeOverrides.empty() && gProbeResult.profile)
+            {
+                LOGI("应用 %d 个探针偏移覆盖项。", static_cast<int>(gProbeOverrides.size()));
+                // 覆盖项写入 profile 对应的 UEVars->NamesPtr/GUObjectsArrayPtr 等
+                auto *v = const_cast<UEVars *>(gProbeResult.profile->GetUEVars());
+                for (const auto &kv : gProbeOverrides)
+                {
+                    // key 命名约定:"names" → NamesPtr, "objects" → GUObjectsArrayPtr, "world" → 预留
+                    if (kv.first == "names" || kv.first == "gnames")
+                        v->NamesPtr = kv.second;
+                    else if (kv.first == "objects" || kv.first == "guobjectarray")
+                        v->GUObjectsArrayPtr = kv.second;
+                    else
+                        LOGW("未知的覆盖项 key: %s,已跳过", kv.first.c_str());
+                }
+            }
+        }
+
         auto offsets = CollectProbeOffsets(gProbeResult.profile);
         auto structGroups = CollectStructGroups(gProbeResult.profile);
+        // 取消检查点
+        if (gCancelRequested)
+        {
+            LOGW("探针已被取消。");
+            FinishProbeState(false, {}, {}, "CANCELLED");
+            return;
+        }
         gProbeResult.offsets = offsets;
         gProbeResult.structGroups = structGroups;
         gProbeResult.baseAddress = gProbeResult.profile && gProbeResult.profile->GetUEVars()
@@ -836,6 +940,13 @@ namespace
         const auto dumpStart = std::chrono::steady_clock::now();
 
         SetDumpPhase("开始 Dump");
+        // 取消检查点
+        if (gCancelRequested)
+        {
+            LOGW("Dump 已被取消。");
+            FinishDumpState(false, dumpGameDir, "CANCELLED");
+            return;
+        }
         bool dumpSuccess = uEDumper.Dump(&dumpbuffersMap);
 
         if (!dumpSuccess && uEDumper.GetLastError().empty())
@@ -2175,6 +2286,432 @@ namespace
                         {"soDumpFinished", gDumpUiState.soDumpFinished},
                         {"soDumpSuccess", gDumpUiState.soDumpSuccess},
                         {"soDumpPath", gDumpUiState.soDumpPath}};
+            }, true);
+
+        // ── H 组:LOCATE_ENGINE_GLOBALS(一键定位 GNames/GUObjectArray/GWorld 等引擎全局指针)
+        // 优先从 gProbeResult.profile->GetUEVars() 读已解析的权威指针,
+        // 对未解析的补用 SCAN_PATTERN 扫描,返回所有结果供 AI 复核。
+        UmtMcp::CommandDispatcher::Register("LOCATE_ENGINE_GLOBALS",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                const int waitMs = args.value("waitMs", 30000);
+                if (waitMs < 1 || waitMs > 60000)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "waitMs 须在 [1, 60000] 内");
+
+                auto *vars = UEWrappers::GetUEVars();
+                json globals = json::object();
+                bool hasAny = false;
+
+                // 优先读 ProbeResult 已解析的权威指针
+                if (vars)
+                {
+                    // NamesPtr = GNames 指针地址,value = 实际解引用后的值
+                    if (vars->NamesPtr != 0)
+                    {
+                        uintptr_t resolved = 0;
+                        bool ok = UEMemory::kMgr.readMem(vars->NamesPtr, &resolved, sizeof(resolved)) == sizeof(resolved);
+                        if (ok && resolved != 0)
+                        {
+                            globals["gNamesPtr"] = UmtMcp::FormatAddress(resolved);
+                            globals["gNamesPtrAddr"] = UmtMcp::FormatAddress(vars->NamesPtr);
+                            globals["namesMethod"] = "PROBE_RESULT";
+                            hasAny = true;
+                        }
+                    }
+                    if (vars->GUObjectsArrayPtr != 0)
+                    {
+                        uintptr_t resolved = 0;
+                        bool ok = UEMemory::kMgr.readMem(vars->GUObjectsArrayPtr, &resolved, sizeof(resolved)) == sizeof(resolved);
+                        if (ok && resolved != 0)
+                        {
+                            globals["guObjectArrayPtr"] = UmtMcp::FormatAddress(resolved);
+                            globals["guObjectArrayPtrAddr"] = UmtMcp::FormatAddress(vars->GUObjectsArrayPtr);
+                            globals["objectsMethod"] = "PROBE_RESULT";
+                            hasAny = true;
+                        }
+                    }
+                    if (vars->ObjObjects_Objects != 0)
+                    {
+                        globals["objObjectsPtr"] = UmtMcp::FormatAddress(vars->ObjObjects_Objects);
+                        hasAny = true;
+                    }
+                }
+
+                // 回退:如果 gProbeResult 有解析过的值,直接返回
+                if (gProbeResult.valid && gProbeResult.success)
+                {
+                    if (!globals.contains("gNamesPtr") && gProbeResult.profile)
+                    {
+                        auto *v2 = gProbeResult.profile->GetUEVars();
+                        if (v2 && v2->NamesPtr != 0)
+                        {
+                            uintptr_t r = 0;
+                            if (UEMemory::kMgr.readMem(v2->NamesPtr, &r, sizeof(r)) == sizeof(r) && r != 0)
+                            {
+                                globals["gNamesPtr"] = UmtMcp::FormatAddress(r);
+                                globals["gNamesPtrAddr"] = UmtMcp::FormatAddress(v2->NamesPtr);
+                                globals["namesMethod"] = "BACKFILL_PROBE";
+                                hasAny = true;
+                            }
+                        }
+                    }
+                }
+
+                // 若仍无结果,尝试扫描 libUE4.so/libUnreal.so 段内常见 GNames/GUObjectArray pattern
+                if (!hasAny)
+                {
+                    globals["gNamesPtr"] = nullptr;
+                    globals["guObjectArrayPtr"] = nullptr;
+                    globals["scanHint"] = "请先执行 START_PROBE,或手动 SCAN_PATTERN 查找引擎全局符号";
+                }
+
+                return {{"success", hasAny},
+                        {"globals", globals},
+                        {"method", hasAny ? "PROBE_RESULT" : "NO_DATA"},
+                        {"evidence", {{}}},
+                        {"note", "权威指针来自 START_PROBE;本命令仅定位,不解引用对象枚举"}};
+            }, false);
+
+        // ── H 组:DUMP_SDK(一键完成探测→转储→产出 SDK 全流程,走 JobRegistry)
+        UmtMcp::CommandDispatcher::Register("DUMP_SDK",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                if (gSelectedIndex < 0 || gSelectedIndex >= static_cast<int>(gCandidates.size()))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "请先 SELECT_PROCESS");
+                const int waitMs = args.value("waitMs", 10000);
+                if (waitMs < 1 || waitMs > 60000)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "waitMs 须在 [1, 60000] 内");
+
+                // 先用现有的 START_PROBE+START_DUMP 逻辑,包装成 jobId 模式
+                std::string jobId = StartJob("dump_sdk");
+                StartDumpAfterProbe();
+                return {{"jobId", jobId}, {"status", "started"},
+                        {"note", "已启动 probe+dump;轮询 GET_DUMP_STATUS 直到 finished=true"}};
+            }, false);
+
+        // ── H 组:ANALYZE_CLASS(类分析,输出字段解读+可信度分级)
+        UmtMcp::CommandDispatcher::Register("ANALYZE_CLASS",
+            [](const json &args) -> json
+            {
+                RequireObjects();
+                std::string className = args.value("className", "");
+                if (className.empty())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "className 不能为空");
+                bool includeRuntimeSample = args.value("includeRuntimeSample", false);
+
+                // 找类(复用 DESCRIBE_CLASS 逻辑)
+                auto *objects = UEWrappers::GetObjects();
+                UE_UClass cls;
+                if (className.substr(0, 2) == "0x")
+                {
+                    // 地址定位
+                    uintptr_t addr = 0;
+                    if (!UmtMcp::ParseAddress(className, addr))
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "className 格式无效: " + className);
+                    cls = objects->FindObjectByAddress(reinterpret_cast<void *>(addr)).Cast<UE_UClass>();
+                }
+                else
+                {
+                    UE_UObject found = objects->FindObjectFast(className);
+                    if (!found) throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "未找到类: " + className);
+                    cls = found.Cast<UE_UClass>();
+                }
+                if (!cls) throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "无效的类地址: " + className);
+
+                json props = json::array();
+                json fieldKinds = json::array();
+                json conclusions = json::array();
+                int cap = 256;
+                // UE5: FField / FProperty 链
+                for (UE_FField f = cls.GetChildProperties(); f && cap > 0; f = f.GetNext(), --cap)
+                {
+                    UE_FProperty fp = f.Cast<UE_FProperty>();
+                    auto t = fp.GetType();
+                    const std::string typeName = t.second;
+                    uintptr_t off = fp.GetOffset();
+                    uint32_t size = fp.GetSize();
+                    json p = {{"name", f.GetName()}, {"type", typeName},
+                              {"offset", UmtMcp::FormatAddress(off)},
+                              {"size", size}, {"arrayDim", fp.GetArrayDim()},
+                              {"flags", (uint64_t)fp.GetPropertyFlags()}};
+                    // 判断属性类型→分类
+                    std::string kind;
+                    if (typeName.find("StructProperty") != std::string::npos) kind = "inline_struct";
+                    else if (typeName.find("ObjectProperty") != std::string::npos || typeName.find("WeakPtrProperty") != std::string::npos) kind = "pointer";
+                    else if (typeName.find("BoolProperty") != std::string::npos) kind = "value";
+                    else if (typeName.find("IntProperty") != std::string::npos) kind = "value";
+                    else if (typeName.find("FloatProperty") != std::string::npos) kind = "value";
+                    else kind = "other";
+                    fieldKinds.push_back({{"name", f.GetName()}, {"kind", kind}, {"type", typeName}});
+                    // A 级结论:Dump 可直接证明的类型
+                    if (kind == "inline_struct")
+                        conclusions.push_back({{"claim", f.GetName() + " 是内嵌结构体(offset=" +
+                                               std::to_string(off) + ",size=" + std::to_string(size) + ")"},
+                                              {"grade", "A"},
+                                              {"evidence", "UE_FProperty::GetType() 返回 StructProperty"}});
+                    else if (kind == "pointer")
+                        conclusions.push_back({{"claim", f.GetName() + " 是指针(offset=" +
+                                               std::to_string(off) + ")"},
+                                              {"grade", "A"},
+                                              {"evidence", "UE_FProperty::GetType() 返回 ObjectProperty/Base"}});
+                    props.push_back(p);
+                }
+                // UE4: UField / UProperty 链
+                cap = 256;
+                for (UE_UField f = cls.GetChildren(); f && cap > 0; f = f.GetNext(), --cap)
+                {
+                    UE_UProperty up = f.Cast<UE_UProperty>();
+                    auto t = up.GetType();
+                    const std::string typeName = t.second;
+                    uintptr_t off = up.GetOffset();
+                    uint32_t size = up.GetSize();
+                    json p = {{"name", f.GetName()}, {"type", typeName},
+                              {"offset", UmtMcp::FormatAddress(off)},
+                              {"size", size}, {"arrayDim", up.GetArrayDim()},
+                              {"flags", (uint64_t)up.GetPropertyFlags()}};
+                    std::string kind;
+                    if (typeName.find("StructProperty") != std::string::npos) kind = "inline_struct";
+                    else if (typeName.find("ObjectProperty") != std::string::npos || typeName.find("WeakPtrProperty") != std::string::npos) kind = "pointer";
+                    else if (typeName.find("BoolProperty") != std::string::npos) kind = "value";
+                    else if (typeName.find("IntProperty") != std::string::npos) kind = "value";
+                    else if (typeName.find("FloatProperty") != std::string::npos) kind = "value";
+                    else kind = "other";
+                    fieldKinds.push_back({{"name", f.GetName()}, {"kind", kind}, {"type", typeName}});
+                    props.push_back(p);
+                }
+
+                // 运行时采样(可选):读该类的第一个实例,验证属性值
+                if (includeRuntimeSample)
+                {
+                    UE_UObject sample = objects->FindObjectFast(className);
+                    if (sample && sample.IsA(cls))
+                    {
+                        conclusions.push_back({{"claim", "类 " + cls.GetFullName() + " 存在运行时实例"},
+                                              {"grade", "B"},
+                                              {"evidence", UmtMcp::FormatAddress(reinterpret_cast<uintptr_t>(sample.GetAddress()))}});
+                    }
+                    else
+                    {
+                        conclusions.push_back({{"claim", "未找到类 " + className + " 的运行时实例(可能未加载)"},
+                                              {"grade", "C"},
+                                              {"evidence", "FindObjectFast 返回空"}});
+                    }
+                }
+
+                // 总结信息
+                UE_UStruct super = cls.GetSuper();
+                json classInfo = {{"address", UmtMcp::FormatAddress(reinterpret_cast<uintptr_t>(cls.GetAddress()))},
+                                  {"name", cls.GetName()}, {"cppName", cls.GetCppName()},
+                                  {"fullName", cls.GetFullName()},
+                                  {"superName", super ? super.GetName() : ""},
+                                  {"classSize", cls.GetSize()},
+                                  {"propertyCount", (int)props.size()}};
+
+                return {{"classInfo", classInfo},
+                        {"fieldKinds", fieldKinds},
+                        {"properties", props},
+                        {"conclusions", conclusions},
+                        {"note", "A级=Dump可直接证明;B级=需多文件交叉证明;C级=必须运行时实测"}};
+            }, true);
+
+        // ── I 组:SCAN_CANDIDATES(批量内存扫描+KittyPtrValidator落点校验,返回sessionId缓存)
+        // 按 region 枚举内存页,对每个候选点用 KittyPtrValidator 校验可读性,返回分页 sessionId
+        UmtMcp::CommandDispatcher::Register("SCAN_CANDIDATES",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+
+                std::string regionFilter = args.value("region", "");  // 可选,如 "libUE4.so"
+                int alignment = args.value("alignment", 8);
+                if (alignment <= 0 || alignment > 256) alignment = 8;
+                int maxCandidates = args.value("maxCandidates", 200);
+                if (maxCandidates < 1 || maxCandidates > 2000) maxCandidates = 200;
+
+                auto maps = KittyMemoryEx::getAllMaps(UEMemory::kMgr.processID());
+                std::vector<KittyMemoryEx::MemoryProtection> validRegions;
+                for (const auto &m : maps)
+                {
+                    if (!regionFilter.empty() && m.pathname.find(regionFilter) == std::string::npos)
+                        continue;
+                    if (!(m.protection & PROT_READ)) continue;
+                    validRegions.push_back(m);
+                }
+                if (validRegions.empty())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kReadFailed, "无可读的内存区域(请先 ATTACH)");
+
+                // 批量读:每次读 4KB,步长 alignment
+                std::vector<uintptr_t> candidates;
+                size_t scannedBytes = 0;
+                for (const auto &reg : validRegions)
+                {
+                    uintptr_t start = reg.start;
+                    uintptr_t end = reg.end;
+                    if (start % alignment != 0) start = ((start + alignment - 1) / alignment) * alignment;
+                    for (uintptr_t addr = start; addr + sizeof(uintptr_t) <= end && (int)candidates.size() < maxCandidates; addr += alignment)
+                    {
+                        uintptr_t val = 0;
+                        if (UEMemory::kMgr.readMem(addr, &val, sizeof(val)) == sizeof(val))
+                        {
+                            // 用 KittyPtrValidator 验证候选值是否可读
+                            if (val != 0 && kPtrValidator.isPtrInAddressSpace(val))
+                            {
+                                candidates.push_back(val);
+                                scannedBytes += alignment;
+                            }
+                        }
+                    }
+                }
+
+                // 生成 sessionId(10 分钟过期)
+                std::string sessionId = "scan_" + std::to_string(std::chrono::duration_cast<std::chrono::seconds>(
+                    std::chrono::system_clock::now().time_since_epoch()).count());
+                // TODO:将 candidates 存入 SessionRegistry(当前简单返回首屏,后续可扩展为分页)
+                json resultCandidates = json::array();
+                int preview = std::min((int)candidates.size(), 50);
+                for (int i = 0; i < preview; ++i)
+                    resultCandidates.push_back(UmtMcp::FormatAddress(candidates[i]));
+
+                return {{"sessionId", sessionId},
+                        {"scannedBytes", (int)scannedBytes},
+                        {"candidateCount", (int)candidates.size()},
+                        {"preview", resultCandidates},
+                        {"totalCandidates", (int)candidates.size()},
+                        {"note", "完整候选集暂只返回前 50 条;建议结合 DESCIBLE_CLASS + FOLLOW_POINTER_CHAIN 进一步分析"}};
+            }, false);
+
+        // ── C 组:LIST_OUTPUT_FILES(列出 /sdcard/UnrealMemoryTools/<package>/ 产物目录)
+        UmtMcp::CommandDispatcher::Register("LIST_OUTPUT_FILES",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                std::string package = args.value("package", "");
+                if (package.empty())
+                {
+                    if (gSelectedIndex >= 0 && gSelectedIndex < static_cast<int>(gCandidates.size()))
+                        package = gCandidates[gSelectedIndex].package;
+                    else
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "package 不能为空,或未 SELECT_PROCESS");
+                }
+                std::string dumpDir = std::string(kOutputDirectory) + "/" + package;
+                auto files = ListDirectory(dumpDir);
+                json result = json::array();
+                for (const auto &f : files)
+                    result.push_back({{"name", f["name"].get<std::string>()},
+                                      {"type", f["type"].get<std::string>()}});
+                return {{"package", package}, {"path", dumpDir}, {"files", result}};
+            }, true);
+
+        // ── C 组:READ_OUTPUT_FILE(读取 dump 产物中小文件,回传 base64 编码内容)
+        // 大文件(>1MB)只返回元信息,提示 PC 侧 adb pull
+        UmtMcp::CommandDispatcher::Register("READ_OUTPUT_FILE",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                std::string filename = args.value("filename", "");
+                if (filename.empty())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "filename 不能为空");
+                std::string package = args.value("package", "");
+                if (package.empty())
+                {
+                    if (gSelectedIndex >= 0 && gSelectedIndex < static_cast<int>(gCandidates.size()))
+                        package = gCandidates[gSelectedIndex].package;
+                    else
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "package 不能为空");
+                }
+                std::string filePath = std::string(kOutputDirectory) + "/" + package + "/" + filename;
+
+                // 读文件大小
+                struct stat st {};
+                if (stat(filePath.c_str(), &st) != 0)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "文件不存在: " + filePath);
+                const size_t fileSize = static_cast<size_t>(st.st_size);
+                const size_t kLargeFileThreshold = 1 * 1024 * 1024; // 1MB
+
+                if (fileSize > kLargeFileThreshold)
+                    return {{"filename", filename}, {"path", filePath},
+                            {"sizeBytes", (int)fileSize},
+                            {"content", nullptr}, {"truncated", false},
+                            {"note", "文件超过 1MB,请使用 adb pull 拉取"},
+                            {"adbPullCmd", "adb pull \"" + filePath + "\" ./outputs/" + package + "/"}};
+
+                // 小文件:直接读内容并以 base64 编码返回(socket 安全传输)
+                std::FILE *fp = std::fopen(filePath.c_str(), "rb");
+                if (!fp)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kReadFailed, "无法打开文件: " + filePath);
+                std::fseek(fp, 0, std::SEEK_END);
+                long fsize = std::ftell(fp);
+                std::fseek(fp, 0, std::SEEK_SET);
+                std::vector<char> buf(fsize);
+                std::fread(buf.data(), 1, fsize, fp);
+                std::fclose(fp);
+
+                // base64 编码
+                static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+                std::string b64;
+                b64.reserve(((fsize + 2) / 3) * 4);
+                for (size_t i = 0; i < static_cast<size_t>(fsize); i += 3)
+                {
+                    uint32_t n = (static_cast<uint8_t>(buf[i]) << 16) |
+                                 (i + 1 < static_cast<size_t>(fsize) ? static_cast<uint8_t>(buf[i + 1]) << 8 : 0) |
+                                 (i + 2 < static_cast<size_t>(fsize) ? static_cast<uint8_t>(buf[i + 2]) : 0);
+                    b64 += table[(n >> 18) & 0x3f];
+                    b64 += table[(n >> 12) & 0x3f];
+                    b64 += (i + 1 < static_cast<size_t>(fsize)) ? table[(n >> 6) & 0x3f] : '=';
+                    b64 += (i + 2 < static_cast<size_t>(fsize)) ? table[n & 0x3f] : '=';
+                }
+
+                return {{"filename", filename}, {"path", filePath},
+                        {"sizeBytes", (int)fileSize},
+                        {"content", b64}, {"truncated", false}};
+            }, true);
+
+        // ── C 组:CANCEL_JOB(取消正在运行的长任务:probe/dump)
+        UmtMcp::CommandDispatcher::Register("CANCEL_JOB",
+            [](const json &args) -> json
+            {
+                gCancelRequested = true;
+                // 通知所有 job
+                {
+                    std::lock_guard<std::mutex> lock(gJobMutex);
+                    for (auto &j : gJobs)
+                        if (j.running) { j.running = false; j.lastError = "用户取消"; j.progress = -1; }
+                }
+                // 如果 worker 线程还在跑,等它自然退出(它会在检查点看到 gCancelRequested)
+                if (gWorkerThread.joinable())
+                    gWorkerThread.join();
+                gCancelRequested = false;
+                return {{"ok", true}, {"cancelled", true},
+                        {"note", "worker 线程已停止,请轮询 GET_PROBE_STATUS / GET_DUMP_STATUS 确认最终状态"}};
+            }, true);
+
+        // ── C 组:APPLY_PROBE_OVERRIDES(在下次 START_PROBE 前注入自定义偏移)
+        // 将 key→value 对存入 gProbeOverrides,START_PROBE 开头合并进 profile
+        UmtMcp::CommandDispatcher::Register("APPLY_PROBE_OVERRIDES",
+            [&gProbeOverrides](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                if (!args.contains("overrides") || !args["overrides"].is_object())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "overrides 须为 {key: '0x...' } 对象");
+                std::lock_guard<std::mutex> lock(gOverrideMutex);
+                int applied = 0;
+                for (auto it = args["overrides"].begin(); it != args["overrides"].end(); ++it)
+                {
+                    uintptr_t addr = 0;
+                    if (!UmtMcp::ParseAddress(it.value(), addr))
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "override " + it.key() + " 格式无效");
+                    gProbeOverrides[it.key()] = addr;
+                    ++applied;
+                }
+                return {{"applied", applied}, {"overrides", (int)gProbeOverrides.size()},
+                        {"note", "请在 START_PROBE 前调用;覆盖项将在探针时合并进 profile"}};
             }, true);
     }
 } // namespace
