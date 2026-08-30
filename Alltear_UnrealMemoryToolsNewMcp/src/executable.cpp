@@ -41,6 +41,7 @@
 #include "mcp/CommandServer.hpp"
 #include "mcp/Protocol.hpp"
 #include "mcp/MemoryHelpers.hpp"
+#include "mcp/Arm64Disasm.hpp"
 
 #include <nlohmann/json.hpp>
 
@@ -1233,6 +1234,120 @@ namespace
                     throw UmtMcp::HandlerError(UmtMcp::Err::kDecodeFailed, "ADRL 解码失败, 地址: " + addrStr);
                 return {{"instructionAddress", UmtMcp::FormatAddress(addr)},
                         {"targetAddress", UmtMcp::FormatAddress(target)}};
+            }, true);
+
+        // ── WRITE_MEMORY（D 组 · 内存原语 · 写入）
+        UmtMcp::CommandDispatcher::Register("WRITE_MEMORY",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                std::string addrStr = args.value("address", "");
+                uintptr_t addr = 0;
+                if (!UmtMcp::ParseAddress(addrStr, addr))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 格式无效: " + addrStr);
+                std::string hex = args.value("hex", "");
+                if (hex.empty())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "hex 不能为空");
+                std::vector<uint8_t> bytes;
+                if (!UmtMcp::HexToBytes(hex, bytes))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "hex 格式无效: " + hex);
+                if (bytes.empty() || bytes.size() > 4096)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "写入长度须在 [1, 4096] 范围内");
+                size_t written = UEMemory::kMgr.writeMem(addr, bytes.data(), bytes.size());
+                if (written != bytes.size())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kWriteFailed,
+                        "写入失败: 请求 " + std::to_string(bytes.size()) + " 字节, 实际 " + std::to_string(written));
+                return {{"address", UmtMcp::FormatAddress(addr)}, {"written", (int)written},
+                        {"hex", UmtMcp::BytesToHex(bytes.data(), bytes.size())}};
+            }, true);
+
+        // ── SCAN_PATTERN（D 组 · 内存原语 · 特征码扫描）
+        UmtMcp::CommandDispatcher::Register("SCAN_PATTERN",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                std::string patternRaw = args.value("pattern", "");
+                if (patternRaw.empty())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "pattern 不能为空");
+                // 仅允许 hex / ? / 空白，防止 findIdaPatternAll 内部异常
+                for (char c : patternRaw)
+                    if (!isxdigit((unsigned char)c) && c != '?' && !isspace((unsigned char)c))
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "pattern 含非法字符（仅 hex / ? / 空白）");
+                std::string pattern = UmtMcp::NormalizeIdaPattern(patternRaw);
+
+                uintptr_t start = 0, end = 0;
+                std::string module = args.value("module", "");
+                if (!module.empty())
+                {
+                    auto maps = KittyMemoryEx::getAllMaps(UEMemory::kMgr.processID());
+                    for (auto &m : maps)
+                    {
+                        if (m.pathname.find(module) != std::string::npos)
+                        { start = m.startAddress; end = m.endAddress; break; }
+                    }
+                    if (start == 0)
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "未找到模块: " + module);
+                }
+                else
+                {
+                    std::string sStr = args.value("start", "");
+                    std::string eStr = args.value("end", "");
+                    if (!UmtMcp::ParseAddress(sStr, start) || !UmtMcp::ParseAddress(eStr, end))
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "需提供 module 或 start+end");
+                    if (end <= start)
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "end 须大于 start");
+                }
+                const uintptr_t kMaxScan = 512ULL * 1024 * 1024; // 512MB 上限，防卡死
+                if (end - start > kMaxScan)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs,
+                        "扫描范围过大 (>" + std::to_string(kMaxScan) + " 字节)");
+
+                auto results = UEMemory::kMgr.memScanner.findIdaPatternAll(start, end, pattern);
+                int maxResults = args.value("maxResults", 200);
+                if (maxResults < 0) maxResults = 200;
+                json hits = json::array();
+                size_t limit = std::min((size_t)results.size(), (size_t)maxResults);
+                for (size_t i = 0; i < limit; ++i)
+                    hits.push_back(UmtMcp::FormatAddress(results[i]));
+                return {{"pattern", pattern}, {"count", (int)results.size()},
+                        {"returned", (int)limit}, {"hits", hits}};
+            }, false); // 扫描可能慢，标为重活
+
+        // ── DISASSEMBLE（E 组 · 理解层 · ARM64 反汇编）
+        UmtMcp::CommandDispatcher::Register("DISASSEMBLE",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                std::string addrStr = args.value("address", "");
+                uintptr_t addr = 0;
+                if (!UmtMcp::ParseAddress(addrStr, addr))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 格式无效: " + addrStr);
+                int count = args.value("count", 16);
+                if (count < 1 || count > 256)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "count 须在 [1, 256] 范围内");
+                const size_t totalBytes = (size_t)count * 4;
+                std::vector<uint8_t> code(totalBytes);
+                size_t read = UEMemory::kMgr.readMem(addr, code.data(), totalBytes);
+                if (read < 4)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kReadFailed, "无法读取指令流");
+                json lines = json::array();
+                uintptr_t pc = addr;
+                size_t off = 0;
+                while (off + 4 <= read && lines.size() < (size_t)count)
+                {
+                    uint32_t insn = 0;
+                    memcpy(&insn, code.data() + off, 4); // 小端设备直接组装
+                    std::string text = UmtMcp::DisassembleArm64(pc, insn);
+                    lines.push_back({{"address", UmtMcp::FormatAddress(pc)},
+                                     {"bytes", UmtMcp::BytesToHex(code.data() + off, 4)},
+                                     {"text", text}});
+                    pc += 4; off += 4;
+                }
+                return {{"address", UmtMcp::FormatAddress(addr)}, {"count", (int)lines.size()},
+                        {"instructions", lines}};
             }, true);
 
         // ── RESOLVE_SYMBOL

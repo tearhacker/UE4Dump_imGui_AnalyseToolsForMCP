@@ -54,6 +54,14 @@ std::string WstringToUtf8(const std::wstring &ws);
 // 权限位 → "rwx" / "rw-" 形式字符串（LIST_MODULES 回显）。
 std::string FormatPermissions(bool readable, bool writeable, bool executable);
 
+// 大小写十六进制串（可含空格 / 0x 前缀）解码为字节序列。非法字符返回 false。
+// 用于 WRITE_MEMORY 的 hex 入参（每字节两位，长度须为偶数）。
+bool HexToBytes(const std::string &s, std::vector<uint8_t> &out);
+
+// 规范化 IDA pattern：把 "??" 合并为 "?"、转大写、压缩空白为单空格、去首尾空格。
+// 用于 SCAN_PATTERN 的 pattern 入参（findIdaPatternAll 期望 "FF DD ? 99 CC ? 00" 格式）。
+std::string NormalizeIdaPattern(const std::string &pattern);
+
 // ---------------------------------------------------------------------------
 // TODO(地基-未暴露业务接口)：以下命令尚未实现，前置依赖见 docs/api 与
 // 《MCP工具功能规格》（A–I 九组，共 42 工具）。实现时在此 namespace 新增

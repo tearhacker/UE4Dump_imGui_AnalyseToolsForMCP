@@ -170,4 +170,83 @@ std::string FormatPermissions(bool readable, bool writeable, bool executable)
     return s;
 }
 
+// 单 hex 字符 → 数值；非法返回 -1
+int HexDigit(char c)
+{
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+    if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+    return -1;
+}
+
+bool HexToBytes(const std::string &s, std::vector<uint8_t> &out)
+{
+    out.clear();
+    std::string t = s;
+    // 去掉可能出现的 "0x"/"0X" 字节前缀（逐处）
+    size_t pos = 0;
+    std::string stripped;
+    stripped.reserve(t.size());
+    while (pos < t.size())
+    {
+        if (t[pos] == '0' && (pos + 1 < t.size()) && (t[pos + 1] == 'x' || t[pos + 1] == 'X'))
+        {
+            pos += 2;
+            continue;
+        }
+        stripped.push_back(t[pos]);
+        ++pos;
+    }
+    // 去空格
+    std::string compact;
+    for (char c : stripped)
+        if (!isspace((unsigned char)c))
+            compact.push_back(c);
+    if (compact.empty() || (compact.size() % 2) != 0)
+        return false;
+    for (size_t i = 0; i < compact.size(); i += 2)
+    {
+        const int hi = HexDigit(compact[i]);
+        const int lo = HexDigit(compact[i + 1]);
+        if (hi < 0 || lo < 0)
+            return false;
+        out.push_back(static_cast<uint8_t>((hi << 4) | lo));
+    }
+    return true;
+}
+
+std::string NormalizeIdaPattern(const std::string &pattern)
+{
+    std::string s = pattern;
+    // "??" → "?"
+    size_t idx;
+    while ((idx = s.find("??")) != std::string::npos)
+        s.replace(idx, 2, "?");
+    // 转大写
+    for (char &c : s)
+        c = static_cast<char>(::toupper((unsigned char)c));
+    // 压缩空白为单空格，去首尾空格
+    std::string out;
+    bool prevSpace = false;
+    for (char c : s)
+    {
+        if (isspace((unsigned char)c))
+        {
+            if (!prevSpace && !out.empty())
+            {
+                out.push_back(' ');
+                prevSpace = true;
+            }
+        }
+        else
+        {
+            out.push_back(c);
+            prevSpace = false;
+        }
+    }
+    while (!out.empty() && out.back() == ' ')
+        out.pop_back();
+    return out;
+}
+
 }  // namespace UmtMcp
