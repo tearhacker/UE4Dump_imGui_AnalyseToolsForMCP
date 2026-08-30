@@ -191,6 +191,7 @@ PC 侧发 AUTH 帧（携带一次性 token）
 | `E_NOT_READY` | 前置条件未满足（如 probe 未完成、进程已切换需重 probe） | 执行失败 |
 | `E_NOT_FOUND` | 符号 / 资源 / 进程未找到 | 执行失败 |
 | `E_DECODE_FAILED` | 指令解码失败（如 ADRL 解码无目标地址） | 执行失败 |
+| `E_PTRACE_FAILED` | ptrace attach/detach 失败，或远程调用异常（F 组）。含 ptrace 不可用 / 权限不足 / 目标进程已退出 / `mmap` 返回 `MAP_FAILED` | 执行失败 |
 
 ### 错误分层（架构 §2.1 修正 2）
 

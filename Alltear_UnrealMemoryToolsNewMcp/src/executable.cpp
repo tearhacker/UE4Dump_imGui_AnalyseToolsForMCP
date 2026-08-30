@@ -42,6 +42,10 @@
 #include "mcp/Protocol.hpp"
 #include "mcp/MemoryHelpers.hpp"
 #include "mcp/Arm64Disasm.hpp"
+#include "mcp/PtraceSession.hpp"
+#include "UE/UEWrappers.hpp"
+#include <sys/mman.h>
+#include <cstdlib>
 
 #include <nlohmann/json.hpp>
 
@@ -1008,6 +1012,75 @@ namespace
     // 本函数定义在匿名 namespace 内部，因此可以直接访问 FindAutoProcessCandidates
     // 与 gDumpUiState。
     // ---------------------------------------------------------------------
+    // G 组引擎语义命令的前置检查：attach 完成 + probe 完成 + UEWrappers 已初始化。
+    // 复用 START_PROBE 已建好的运行时（UEWrappers::Init 在 profile 初始化时调用），不重写探测逻辑。
+    static UE_UObjectArray *RequireObjects()
+    {
+        if (!UEMemory::kMgr.isMemValid())
+            throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+        if (!gProbeResult.valid || !gProbeResult.profile)
+            throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "请先 START_PROBE 完成探针流程");
+        auto *objects = UEWrappers::GetObjects();
+        if (!objects)
+            throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "对象数组未初始化（探针未完成）");
+        return objects;
+    }
+
+    // ── F 组远程调用的共用辅助 ────────────────────────────────────────────────
+
+    // 解析单个调用参数：支持 "0x..."（地址/指针）与 "i:123"（十进制或 0x 整数）。
+    bool ParseCallArg(const std::string &s, uintptr_t &out)
+    {
+        if (s.size() > 2 && s[0] == 'i' && s[1] == ':')
+        {
+            errno = 0;
+            char *end = nullptr;
+            const long long v = std::strtoll(s.c_str() + 2, &end, 0);
+            if (errno != 0 || !end || *end != '\0') return false;
+            out = static_cast<uintptr_t>(v);
+            return true;
+        }
+        return UmtMcp::ParseAddress(s, out);
+    }
+
+    // 按 returnKind 解释 64 位返回值；同时保留原始值供 AI 校验。
+    // 注意：json 别名声明在 namespace UmtMcp 内（CommandDispatcher.hpp），此处在全局匿名
+    // 命名空间中，必须显式限定 UmtMcp::json（SetupMcpCommands 内部才有局部 using json）。
+    UmtMcp::json FormatReturnValue(uintptr_t raw, const std::string &kind)
+    {
+        if (kind == "void") return nullptr;
+        if (kind == "i32") return static_cast<int32_t>(raw);
+        if (kind == "i64") return static_cast<int64_t>(raw);
+        if (kind == "f32")
+        {
+            const uint32_t lo = static_cast<uint32_t>(raw & 0xFFFFFFFFu);
+            float f = 0.f;
+            std::memcpy(&f, &lo, sizeof(f));
+            return f;
+        }
+        return UmtMcp::FormatAddress(raw);  // 默认 ptr
+    }
+
+    // KittyTraceMgr::callFunctionFrom 是变参函数，按实参个数分发（aarch64 最多 8 个寄存器参数）。
+    uintptr_t InvokeRemoteFunction(uintptr_t trapAddress, uintptr_t functionAddress,
+                                   const std::vector<uintptr_t> &a)
+    {
+        const auto &t = UEMemory::kMgr.trace;
+        switch (a.size())
+        {
+            case 0: return t.callFunctionFrom(trapAddress, functionAddress, 0);
+            case 1: return t.callFunctionFrom(trapAddress, functionAddress, 1, a[0]);
+            case 2: return t.callFunctionFrom(trapAddress, functionAddress, 2, a[0], a[1]);
+            case 3: return t.callFunctionFrom(trapAddress, functionAddress, 3, a[0], a[1], a[2]);
+            case 4: return t.callFunctionFrom(trapAddress, functionAddress, 4, a[0], a[1], a[2], a[3]);
+            case 5: return t.callFunctionFrom(trapAddress, functionAddress, 5, a[0], a[1], a[2], a[3], a[4]);
+            case 6: return t.callFunctionFrom(trapAddress, functionAddress, 6, a[0], a[1], a[2], a[3], a[4], a[5]);
+            case 7: return t.callFunctionFrom(trapAddress, functionAddress, 7, a[0], a[1], a[2], a[3], a[4], a[5], a[6]);
+            case 8: return t.callFunctionFrom(trapAddress, functionAddress, 8, a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7]);
+            default: return 0;
+        }
+    }
+
     void SetupMcpCommands()
     {
         using json = nlohmann::json;
@@ -1348,6 +1421,485 @@ namespace
                 }
                 return {{"address", UmtMcp::FormatAddress(addr)}, {"count", (int)lines.size()},
                         {"instructions", lines}};
+            }, true);
+
+        // ── F 组 远程调用（ptrace，风险最高）
+        // 复用 KittyTraceMgr::callFunctionFrom（KittyTrace.cpp:140，此前 src/ 零引用）+ findRemoteOfSymbol，
+        // 会话生命周期由 UmtMcp::PtraceSessionRegistry 管理（四重兜底）。
+        //
+        // ⚠️ 返回陷阱靠 SIGSEGV/SIGILL 判定，无法区分"陷阱正常触发"与"被调函数自己崩了"，
+        //    因此每个结果都附带 rawHex，AI 必须自行校验返回值合理性。
+        //
+        // TODO(契约对齐): GET_CAPABILITIES 应按 ptraceAvailable 动态摘除 F 组命令；
+        //   探测 ptrace 可用性需要真实 attach（会短暂冻结目标进程），不适合在 capabilities 里做，
+        //   改由调用时返回 E_PTRACE_FAILED 表达不可用。
+
+        // ── BEGIN_ATTACH_SESSION（F 组：建立冻结会话，四重兜底由 PtraceSessionRegistry 保证）
+        UmtMcp::CommandDispatcher::Register("BEGIN_ATTACH_SESSION",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                int maxHoldMs = args.value("maxHoldMs", UmtMcp::kSessionDefaultHoldMs);
+                if (maxHoldMs < 1 || maxHoldMs > UmtMcp::kSessionMaxHoldLimitMs)
+                    maxHoldMs = UmtMcp::kSessionDefaultHoldMs;
+                std::string id;
+                try
+                {
+                    id = UmtMcp::PtraceSessionRegistry::Instance().Begin(maxHoldMs);
+                }
+                catch (const std::exception &e)
+                {
+                    // 异常兜底：attach 失败也要确保不残留冻结状态
+                    UmtMcp::PtraceSessionRegistry::Instance().ForceDetachAll();
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kPtraceFailed, e.what());
+                }
+                return {{"sessionId", id}, {"maxHoldMs", maxHoldMs},
+                        {"note", "会话期间目标进程被冻结；务必调用 END_ATTACH_SESSION，否则看门狗将在超时后强制 detach"}};
+            }, true);
+
+        // ── END_ATTACH_SESSION（F 组：结束会话并恢复目标进程）
+        UmtMcp::CommandDispatcher::Register("END_ATTACH_SESSION",
+            [](const json &args) -> json
+            {
+                std::string sessionId = args.value("sessionId", "");
+                if (sessionId.empty())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "sessionId 不能为空");
+                const int64_t elapsed = UmtMcp::PtraceSessionRegistry::Instance().End(sessionId);
+                if (elapsed < 0)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "无效或已结束的 sessionId: " + sessionId);
+                return {{"ok", true}, {"elapsedMs", elapsed}};
+            }, true);
+
+        // ── CALL_REMOTE_FUNCTION（F 组：在会话内调用单个函数）
+        UmtMcp::CommandDispatcher::Register("CALL_REMOTE_FUNCTION",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                if (args.value("confirmDangerous", false) != true)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs,
+                        "远程调用会在目标进程内执行代码。请先用 SCAN_PATTERN / DISASSEMBLE 验证函数地址，"
+                        "并显式传 confirmDangerous=true 确认");
+                std::string sessionId = args.value("sessionId", "");
+                if (!UmtMcp::PtraceSessionRegistry::Instance().Touch(sessionId))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound,
+                        "无效或已超时的 sessionId: " + sessionId + "（需先 BEGIN_ATTACH_SESSION）");
+                std::string addrStr = args.value("address", "");
+                uintptr_t fn = 0;
+                if (!UmtMcp::ParseAddress(addrStr, fn))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 格式无效: " + addrStr);
+                std::vector<uintptr_t> callArgs;
+                if (args.contains("args"))
+                {
+                    if (!args["args"].is_array())
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "args 须为数组");
+                    for (const auto &a : args["args"])
+                    {
+                        uintptr_t v = 0;
+                        const std::string s = a.is_string() ? a.get<std::string>() : "";
+                        if (!ParseCallArg(s, v))
+                            throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "参数格式无效: " + s);
+                        callArgs.push_back(v);
+                    }
+                }
+                if (callArgs.size() > 8)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "参数最多 8 个（aarch64 寄存器传参上限）");
+                uintptr_t trap = 0;  // 返回陷阱：执行 0 地址必触发 SIGSEGV
+                const std::string trapStr = args.value("trapAddress", "");
+                if (!trapStr.empty() && !UmtMcp::ParseAddress(trapStr, trap))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "trapAddress 格式无效: " + trapStr);
+                const std::string returnKind = args.value("returnKind", "ptr");
+
+                uintptr_t raw = 0;
+                try
+                {
+                    raw = InvokeRemoteFunction(trap, fn, callArgs);
+                }
+                catch (...)
+                {
+                    // 异常兜底：任何异常先 detach 再返回错误
+                    UmtMcp::PtraceSessionRegistry::Instance().End(sessionId);
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kPtraceFailed, "远程调用异常，已强制结束会话");
+                }
+                return {{"ok", true},
+                        {"value", FormatReturnValue(raw, returnKind)},
+                        {"rawHex", UmtMcp::FormatAddress(raw)},
+                        {"note", "返回陷阱靠 SIGSEGV/SIGILL 判定，无法区分陷阱触发与被调函数崩溃，请校验 value 合理性"}};
+            }, true);
+
+        // ── CALL_REMOTE_FUNCTION_BATCH（F 组主推：无状态，内部 attach→N次→detach，不可能泄漏会话）
+        UmtMcp::CommandDispatcher::Register("CALL_REMOTE_FUNCTION_BATCH",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                if (args.value("confirmDangerous", false) != true)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs,
+                        "远程调用会在目标进程内执行代码。请先用 SCAN_PATTERN / DISASSEMBLE 验证函数地址，"
+                        "并显式传 confirmDangerous=true 确认");
+                if (UmtMcp::PtraceSessionRegistry::Instance().IsActive())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs,
+                        "已有活动会话 " + UmtMcp::PtraceSessionRegistry::Instance().ActiveId() +
+                        "；批量调用是无状态的，请先 END_ATTACH_SESSION");
+                std::string addrStr = args.value("address", "");
+                uintptr_t fn = 0;
+                if (!UmtMcp::ParseAddress(addrStr, fn))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 格式无效: " + addrStr);
+                if (!args.contains("argSets") || !args["argSets"].is_array())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "argSets 须为数组（每组一次调用）");
+                const std::string returnKind = args.value("returnKind", "ptr");
+                int maxHoldMs = args.value("maxHoldMs", UmtMcp::kSessionDefaultHoldMs);
+                if (maxHoldMs < 1 || maxHoldMs > UmtMcp::kSessionMaxHoldLimitMs)
+                    maxHoldMs = UmtMcp::kSessionDefaultHoldMs;
+                uintptr_t trap = 0;
+                const std::string trapStr = args.value("trapAddress", "");
+                if (!trapStr.empty() && !UmtMcp::ParseAddress(trapStr, trap))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "trapAddress 格式无效: " + trapStr);
+
+                const auto t0 = std::chrono::steady_clock::now();
+                if (!UEMemory::kMgr.trace.Attach())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kPtraceFailed,
+                        "PTRACE_ATTACH 失败（ptrace 不可用 / 权限不足 / 目标进程已退出）");
+
+                json results = json::array();
+                int callCount = 0;
+                try
+                {
+                    for (const auto &set : args["argSets"])
+                    {
+                        // 总时长预算：超过 maxHoldMs 立即停止（避免长时间冻结目标进程）
+                        const auto heldMs = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                                std::chrono::steady_clock::now() - t0).count();
+                        if (heldMs > maxHoldMs) break;
+
+                        if (!set.is_array())
+                            throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "argSets 每一项须为参数数组");
+                        std::vector<uintptr_t> callArgs;
+                        for (const auto &a : set)
+                        {
+                            uintptr_t v = 0;
+                            const std::string s = a.is_string() ? a.get<std::string>() : "";
+                            if (!ParseCallArg(s, v))
+                                throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "参数格式无效: " + s);
+                            callArgs.push_back(v);
+                        }
+                        if (callArgs.size() > 8)
+                            throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "单次调用参数最多 8 个");
+                        const uintptr_t raw = InvokeRemoteFunction(trap, fn, callArgs);
+                        ++callCount;
+                        results.push_back({{"ok", true},
+                                           {"value", FormatReturnValue(raw, returnKind)},
+                                           {"rawHex", UmtMcp::FormatAddress(raw)}});
+                    }
+                }
+                catch (...)
+                {
+                    UEMemory::kMgr.trace.Detach();  // 异常兜底：先 detach 再抛
+                    throw;
+                }
+                UEMemory::kMgr.trace.Detach();
+
+                const auto elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                         std::chrono::steady_clock::now() - t0).count();
+                return {{"results", results}, {"elapsedMs", elapsed}, {"callCount", callCount},
+                        {"note", "无状态：本次调用内部已完成 attach/detach。返回陷阱靠 SIGSEGV/SIGILL 判定，请校验 value"}};
+            }, false);
+
+        // ── ALLOC_SCRATCH（F 组：在目标进程内 mmap 可写缓冲区）
+        // 用 KittyMemoryMgr::findRemoteOfSymbol(KT_LOCAL_SYMBOL(mmap)) 解析目标进程 mmap 地址后远程调用。
+        UmtMcp::CommandDispatcher::Register("ALLOC_SCRATCH",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                const int size = args.value("size", 0);
+                if (size < 1 || size > 65536)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "size 须在 [1, 65536]");
+                if (UmtMcp::PtraceSessionRegistry::Instance().IsActive())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs,
+                        "已有活动会话 " + UmtMcp::PtraceSessionRegistry::Instance().ActiveId() +
+                        "；ALLOC_SCRATCH 是无状态的，请先 END_ATTACH_SESSION");
+
+                const uintptr_t remoteMmap = UEMemory::kMgr.findRemoteOfSymbol(KT_LOCAL_SYMBOL(mmap));
+                if (!remoteMmap)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "无法解析目标进程的 mmap 符号");
+
+                if (!UEMemory::kMgr.trace.Attach())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kPtraceFailed, "PTRACE_ATTACH 失败");
+
+                uintptr_t addr = 0;
+                try
+                {
+                    // mmap(NULL, size, PROT_READ|PROT_WRITE, MAP_PRIVATE|MAP_ANONYMOUS, -1, 0)
+                    addr = UEMemory::kMgr.trace.callFunctionFrom(0, remoteMmap, 6,
+                        static_cast<uintptr_t>(0), static_cast<uintptr_t>(size),
+                        static_cast<uintptr_t>(PROT_READ | PROT_WRITE),
+                        static_cast<uintptr_t>(MAP_PRIVATE | MAP_ANONYMOUS),
+                        static_cast<uintptr_t>(-1), static_cast<uintptr_t>(0));
+                }
+                catch (...)
+                {
+                    UEMemory::kMgr.trace.Detach();  // 异常兜底
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kPtraceFailed, "目标进程 mmap 调用异常");
+                }
+                UEMemory::kMgr.trace.Detach();
+
+                if (addr == static_cast<uintptr_t>(-1) || addr == 0)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kPtraceFailed,
+                        "目标进程 mmap 返回失败 (MAP_FAILED)");
+
+                UmtMcp::PtraceSessionRegistry::Instance().RecordAlloc(addr, static_cast<size_t>(size));
+                return {{"address", UmtMcp::FormatAddress(addr)}, {"size", size}};
+            }, false);
+
+        // ── G 组 引擎语义（实时交互，直接复用 UEWrappers 运行时设施，不重写稳定逻辑）
+        // 这些命令把原版 START_DUMP 落盘的 GNames.txt / Objects.txt / SDK 能力，做成可被 PC 侧
+        // 实时查询的交互接口（对应 docs/api/12 外迁清单 G 组 与 mcp-protocol.md §6）。
+
+        // ── SCAN_GNAMES（G 组：定位 GNames/FNamePool 候选并自校验）
+        // 复用 START_PROBE 已解析出的 GNames 指针；扫描语义 = 报告权威候选 + 采样若干 name 自校验。
+        // 若需"从零全网扫描"应改为 isFast=false 投 worker（见 MemoryHelpers.hpp TODO），当前探针已缓存权威指针。
+        UmtMcp::CommandDispatcher::Register("SCAN_GNAMES",
+            [](const json &) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                if (!gProbeResult.valid || !gProbeResult.profile)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "请先 START_PROBE 完成探针流程");
+                const auto *vars = gProbeResult.profile->GetUEVars();
+                if (!vars || !vars->GetNamesPtr())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "GNames 指针未解析（探针未完成）");
+                uintptr_t namesPtr = vars->GetNamesPtr();
+                bool useFNamePool = gProbeResult.profile->IsUsingFNamePool();
+                bool casePreserving = gProbeResult.profile->isUsingCasePreservingName();
+                json samples = json::array();
+                bool anyValid = false;
+                for (int32_t i = 0; i < 16; ++i)
+                {
+                    std::string nm = UEWrappers::GetNameByID(i);
+                    bool valid = !nm.empty() && nm.find('\0') == std::string::npos;
+                    if (valid) anyValid = true;
+                    samples.push_back({{"index", i}, {"name", nm}, {"valid", valid}});
+                }
+                return {{"namesPtr", UmtMcp::FormatAddress(namesPtr)},
+                        {"layout", useFNamePool ? "FNamePool" : "FNameEntryArray"},
+                        {"casePreserving", casePreserving},
+                        {"valid", anyValid},
+                        {"sampleNames", samples}};
+            }, true);
+
+        // ── SAMPLE_GNAMES（G 组：采样任意 name 索引，确认某段确实是真实 GNames）
+        UmtMcp::CommandDispatcher::Register("SAMPLE_GNAMES",
+            [](const json &args) -> json
+            {
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
+                if (!gProbeResult.valid || !gProbeResult.profile)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "请先 START_PROBE 完成探针流程");
+                int32_t startIndex = args.value("startIndex", 0);
+                int32_t count = args.value("count", 32);
+                if (startIndex < 0)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "startIndex 须 >= 0");
+                if (count < 1 || count > 2000)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "count 须在 [1, 2000]");
+                json samples = json::array();
+                for (int32_t i = startIndex; i < startIndex + count; ++i)
+                {
+                    std::string nm = UEWrappers::GetNameByID(i);
+                    bool valid = !nm.empty() && nm.find('\0') == std::string::npos;
+                    samples.push_back({{"index", i}, {"name", nm}, {"valid", valid}});
+                }
+                return {{"startIndex", startIndex}, {"count", count}, {"samples", samples}};
+            }, true);
+
+        // ── SCAN_OBJECTS（G 组：定位 GUObjectArray 候选并自校验）
+        UmtMcp::CommandDispatcher::Register("SCAN_OBJECTS",
+            [](const json &) -> json
+            {
+                auto *objects = RequireObjects();
+                uintptr_t arrPtr = 0;
+                const auto *vars = UEWrappers::GetUEVars();
+                if (vars) arrPtr = vars->GetGUObjectsArrayPtr();
+                int32_t total = objects->GetNumElements();
+                const int32_t kSample = 16;
+                json samples = json::array();
+                for (int32_t i = 0; i < kSample && i < total; ++i)
+                {
+                    UE_UObject obj = objects->GetObjectPtr(i);
+                    if (!obj)
+                    {
+                        samples.push_back({{"index", i}, {"valid", false}});
+                        continue;
+                    }
+                    samples.push_back({{"index", i},
+                                      {"name", obj.GetName()},
+                                      {"className", obj.GetClass().GetName()},
+                                      {"valid", true}});
+                }
+                return {{"objectArrayPtr", UmtMcp::FormatAddress(arrPtr)},
+                        {"totalObjects", total},
+                        {"sampleObjects", samples}};
+            }, true);
+
+        // ── SAMPLE_OBJECTS（G 组：采样对象数组条目，读取其名/类名/Outer）
+        UmtMcp::CommandDispatcher::Register("SAMPLE_OBJECTS",
+            [](const json &args) -> json
+            {
+                auto *objects = RequireObjects();
+                int32_t startIndex = args.value("startIndex", 0);
+                int32_t count = args.value("count", 32);
+                int32_t total = objects->GetNumElements();
+                if (startIndex < 0 || startIndex >= total)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "startIndex 越界");
+                if (count < 1 || count > 2000)
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "count 须在 [1, 2000]");
+                json samples = json::array();
+                for (int32_t i = startIndex; i < startIndex + count && i < total; ++i)
+                {
+                    UE_UObject obj = objects->GetObjectPtr(i);
+                    if (!obj)
+                    {
+                        samples.push_back({{"index", i}, {"valid", false}});
+                        continue;
+                    }
+                    UE_UObject outer = obj.GetOuter();
+                    samples.push_back({{"index", i},
+                                      {"name", obj.GetName()},
+                                      {"className", obj.GetClass().GetName()},
+                                      {"outerName", outer ? outer.GetName() : ""},
+                                      {"valid", true}});
+                }
+                return {{"startIndex", startIndex}, {"count", (int32_t)samples.size()},
+                        {"totalObjects", total}, {"samples", samples}};
+            }, true);
+
+        // ── SEARCH_CLASSES（G 组：按名搜类，服务端过滤；遍历量可能大，标 isFast=false）
+        UmtMcp::CommandDispatcher::Register("SEARCH_CLASSES",
+            [](const json &args) -> json
+            {
+                auto *objects = RequireObjects();
+                std::string filter = args.value("nameFilter", "");
+                if (filter.empty())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "nameFilter 不能为空");
+                int maxResults = args.value("maxResults", 100);
+                if (maxResults < 1 || maxResults > 1000) maxResults = 100;
+                bool caseSensitive = args.value("caseSensitive", false);
+                std::string lf = filter;
+                if (!caseSensitive) std::transform(lf.begin(), lf.end(), lf.begin(), ::tolower);
+                json results = json::array();
+                objects->ForEachObjectOfClass(UE_UClass::StaticClass(),
+                    [&](UE_UObject obj) -> bool
+                    {
+                        if ((int)results.size() >= maxResults) return false;
+                        std::string n = obj.GetName();
+                        std::string cmp = n;
+                        if (!caseSensitive) std::transform(cmp.begin(), cmp.end(), cmp.begin(), ::tolower);
+                        if (cmp.find(lf) != std::string::npos)
+                        {
+                            UE_UClass cls = obj.Cast<UE_UClass>();
+                            results.push_back({{"address", UmtMcp::FormatAddress(reinterpret_cast<uintptr_t>(obj.GetAddress()))},
+                                               {"name", n},
+                                               {"cppName", obj.GetCppName()},
+                                               {"classSize", cls.GetSize()}});
+                        }
+                        return true;
+                    });
+                return {{"nameFilter", filter}, {"count", (int)results.size()}, {"results", results}};
+            }, false);
+
+        // ── DESCRIBE_CLASS（G 组：类结构描述，同时兼容 UE4 UProperty 与 UE5 FProperty 两条属性链）
+        UmtMcp::CommandDispatcher::Register("DESCRIBE_CLASS",
+            [](const json &args) -> json
+            {
+                auto *objects = RequireObjects();
+                UE_UClass cls;
+                std::string addrStr = args.value("address", "");
+                std::string name = args.value("name", "");
+                if (!addrStr.empty())
+                {
+                    uintptr_t addr = 0;
+                    if (!UmtMcp::ParseAddress(addrStr, addr))
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 格式无效: " + addrStr);
+                    cls = UE_UClass(reinterpret_cast<uint8_t *>(addr));
+                }
+                else if (!name.empty())
+                {
+                    UE_UObject found = objects->FindObjectFast(name);
+                    if (!found) throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "未找到类: " + name);
+                    if (!found.IsA(UE_UClass::StaticClass()))
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, name + " 不是 UClass");
+                    cls = found.Cast<UE_UClass>();
+                }
+                else
+                {
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "需提供 address 或 name");
+                }
+                if (!cls) throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "无效的类地址");
+
+                json props = json::array();
+                int cap = 256;
+                // UE5: FField / FProperty 链
+                for (UE_FField f = cls.GetChildProperties(); f && cap > 0; f = f.GetNext(), --cap)
+                {
+                    UE_FProperty fp = f.Cast<UE_FProperty>();
+                    auto t = fp.GetType();
+                    props.push_back({{"name", f.GetName()},
+                                     {"type", t.second},
+                                     {"offset", fp.GetOffset()},
+                                     {"size", fp.GetSize()},
+                                     {"arrayDim", fp.GetArrayDim()},
+                                     {"flags", (uint64_t)fp.GetPropertyFlags()}});
+                }
+                // UE4: UField / UProperty 链
+                for (UE_UField f = cls.GetChildren(); f && cap > 0; f = f.GetNext(), --cap)
+                {
+                    UE_UProperty up = f.Cast<UE_UProperty>();
+                    auto t = up.GetType();
+                    props.push_back({{"name", f.GetName()},
+                                     {"type", t.second},
+                                     {"offset", up.GetOffset()},
+                                     {"size", up.GetSize()},
+                                     {"arrayDim", up.GetArrayDim()},
+                                     {"flags", (uint64_t)up.GetPropertyFlags()}});
+                }
+                UE_UStruct super = cls.GetSuper();
+                UE_UObject cdo = cls.GetClassDefaultObject();
+                return {{"address", UmtMcp::FormatAddress(reinterpret_cast<uintptr_t>(cls.GetAddress()))},
+                        {"name", cls.GetName()},
+                        {"cppName", cls.GetCppName()},
+                        {"fullName", cls.GetFullName()},
+                        {"superName", super ? super.GetName() : ""},
+                        {"classSize", cls.GetSize()},
+                        {"classFlags", (uint32_t)cls.GetClassFlags()},
+                        {"cdoAddress", cdo ? UmtMcp::FormatAddress(reinterpret_cast<uintptr_t>(cdo.GetAddress())) : ""},
+                        {"propertyCount", (int)props.size()},
+                        {"properties", props}};
+            }, true);
+
+        // ── INSPECT_OBJECT（G 组：对象实例检视，读取其标识/类/Outer/索引/标志）
+        UmtMcp::CommandDispatcher::Register("INSPECT_OBJECT",
+            [](const json &args) -> json
+            {
+                auto *objects = RequireObjects();
+                std::string addrStr = args.value("address", "");
+                if (addrStr.empty())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 不能为空");
+                uintptr_t addr = 0;
+                if (!UmtMcp::ParseAddress(addrStr, addr))
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 格式无效: " + addrStr);
+                UE_UObject obj(reinterpret_cast<uint8_t *>(addr));
+                if (!obj) throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "无效对象地址: " + addrStr);
+                UE_UClass cls = obj.GetClass();
+                UE_UObject outer = obj.GetOuter();
+                return {{"address", UmtMcp::FormatAddress(reinterpret_cast<uintptr_t>(obj.GetAddress()))},
+                        {"name", obj.GetName()},
+                        {"cppName", obj.GetCppName()},
+                        {"fullName", obj.GetFullName()},
+                        {"className", cls ? cls.GetName() : ""},
+                        {"outerName", outer ? outer.GetName() : ""},
+                        {"index", obj.GetIndex()},
+                        {"flags", (uint32_t)obj.GetFlags()}};
             }, true);
 
         // ── RESOLVE_SYMBOL
