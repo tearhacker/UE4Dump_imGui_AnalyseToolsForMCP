@@ -2,7 +2,8 @@
 
 > **源码**：`KittyMemoryEx/*.{hpp,cpp}`（约 7000 行，含 zip.cpp 2190）
 > **定位**：第三方底层库（上游 AndUEDumper 同源）。MCP 的 D 组原语 / F 组 ptrace / `resolveSymbol` / `writeMemory` 校验的直接底座。
-> **已精读范围**：**用到的 5 个头文件全文**（KittyMemoryMgr.hpp 133 / KittyScanner.hpp 327 / KittyPtrValidator.hpp 211 / KittyTrace.hpp 123 / KittyMemOp.hpp 51）。cpp 实现未逐行（第三方库，接口契约已足够，`findSymbol`/`callFunctionFrom` 是零调用接线点）。
+> **已精读范围**：**用到的 5 个头文件全文**（KittyMemoryMgr.hpp 133 / KittyScanner.hpp 327 / KittyPtrValidator.hpp 211 / KittyTrace.hpp 123 / KittyMemOp.hpp 51）。cpp 实现未逐行（第三方库，接口契约已足够）。
+> ✅ **2026-08-31 核对**：原标注的"零调用接线点" `findSymbol` / `callFunctionFrom` **均已接线**，见 §0.3。
 
 ---
 
@@ -10,9 +11,15 @@
 
 1. **双内存后端**（`KittyMemOp.hpp:6-11`）：`EK_MEM_OP_SYSCALL`（`process_vm_readv/writev`）vs `EK_MEM_OP_IO`（`/proc/pid/mem`）。`initialize` 可指定，SYSCALL 失败可回退 IO（`executable.cpp:655-656`）。
 2. **`ElfScanner::isValid()` 要求符号表非空**（`KittyScanner.hpp:170-173`，7 字段全非零含 `_symbolTable`）——**strip 掉的 ELF 会 `isValid()==false`**。这是"符号优先策略"失效的根本原因（架构文档 §2.5 已预警）。
-3. **两处「存在但 src/ 零调用」**（MCP 化最划算的接线点）：
-   - `ElfScanner::findSymbol`（`KittyScanner.hpp:211`）→ `resolveSymbol` 工具
-   - `KittyTraceMgr::callFunctionFrom`（`KittyTrace.cpp:140`）→ `callRemoteFunctionBatch` 工具
+3. ✅ **原「存在但 src/ 零调用」的两处，现已全部接线**（原写"MCP 化最划算的接线点"，建议已失效）：
+   - `ElfScanner::findSymbol`（`KittyScanner.hpp:211`）→ `RESOLVE_SYMBOL` 命令
+     （第一级精确匹配，失败回退 `findDebugSymbol`；见 `executable.cpp` 的 `RESOLVE_SYMBOL` handler）
+   - `KittyTraceMgr::callFunctionFrom`（`KittyTrace.cpp:140`）→ `CALL_REMOTE_FUNCTION` /
+     `CALL_REMOTE_FUNCTION_BATCH` / `ALLOC_SCRATCH`
+     （变参按 0..8 个参数分发，见 `executable.cpp` 的 `InvokeRemoteFunction` helper）
+
+   > 三处调用点都在 `src/executable.cpp` **命令注册区**内，行号随命令增删整体位移。
+   > 定位请用命令名：`grep -n 'Register("RESOLVE_SYMBOL"' src/executable.cpp`。
 
 ---
 
@@ -51,8 +58,8 @@
 | `base()` / `end()` / `segments()` / `bssSegments()` | ELF 基址/段 | `:177-218` |
 | `symbols()` | 动态符号（DT_SYMTAB）→ `unordered_map<name, addr>` | `:206` |
 | `dsymbols()` | 调试符号（SHT_SYMTAB 磁盘） | `:209` |
-| **`findSymbol(name)`** | 🔧 **零调用**，符号优先策略的底座 | `:211` |
-| `findDebugSymbol(name)` | 调试符号查找 | `:212` |
+| `findSymbol(name)` | ✅ **已接线** → `RESOLVE_SYMBOL` 命令第一级 | `:211` |
+| `findDebugSymbol(name)` | ✅ 已接线，`RESOLVE_SYMBOL` 第二级回退 | `:212` |
 
 ⚠️ **符号查找语义**：`findSymbol` 走动态符号表（`DT_SYMTAB`），`findDebugSymbol` 走磁盘调试段（`SHT_SYMTAB`）。`resolveSymbol` 工具应两个都试。
 
@@ -83,7 +90,7 @@
 | `Attach()` / `Detach()` / `Cont()` | PTRACE_ATTACH/DETACH/CONT | `:61-71` |
 | `isAttached()` | 检查 TracerPid | `:53-56` |
 | `getRegs()` / `setRegs()` | 寄存器读写 | `:84-89` |
-| **`callFunctionFrom(caller, funcAddr, nargs, ...)`** | 🔧 **零引用**，远程调用核心 | `:114` |
+| **`callFunctionFrom(caller, funcAddr, nargs, ...)`** | ✅ **已接线** → F 组三条命令（`InvokeRemoteFunction` 按 0..8 参分发） | `:114` |
 | `callFunction<Args...>(funcAddr, nargs, ...)` | 转发到 callFunctionFrom（用 defaultCaller） | `:119-123` |
 
 ⚠️ **`callFunctionFrom` 参数是 `callerAddress`（伪造返回地址）+ `functionAddress` + `nargs` + 可变参数**。MCP 的 `callRemoteFunctionBatch` 要封装成：attach → N 次 callFunctionFrom → detach（架构 §2.6 无状态原子操作）。
@@ -106,13 +113,14 @@
 
 | # | 陷阱 | 后果 | 应对 |
 |---|---|---|---|
-| 1 | `findSymbol`/`callFunctionFrom` 零调用 | 能力闲置 | 接线（最划算） |
+| 1 | ~~`findSymbol`/`callFunctionFrom` 零调用~~ | ~~能力闲置~~ | ✅ **已解决**，见 §0.3 |
 | 2 | `ElfScanner::isValid` 要求符号表非空 | strip ELF 判无效 | 符号失败回退 pattern |
 | 3 | `readMem` 返回实际字节数非 bool | 误判成功 | 用 `== len` |
 | 4 | `isPtrReadable` 默认只查 8 字节 | 大 size 越界读 | 带 len 校验整个区间 |
 | 5 | `isPtrWritable` 是 writeMemory 前置 | 不校验直接写崩游戏 | 写前强制校验 |
 | 6 | 双后端 SYSCALL/IO | 后端差异 | initialize 失败回退 |
-| 7 | ptrace 返回陷阱难区分 | 误判调用结果 | 校验返回值 |
+| 7 | ptrace 返回陷阱难区分 | 误判调用结果 | 校验返回值（每个结果附 rawHex） |
+| 8 | 无 free/munmap 命令 | `ALLOC_SCRATCH` 分配的内存无法回收 | 随目标进程生命周期，仅 `RecordAlloc` 记录 |
 
 ---
 

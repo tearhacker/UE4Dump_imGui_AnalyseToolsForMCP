@@ -63,20 +63,22 @@ bool HexToBytes(const std::string &s, std::vector<uint8_t> &out);
 std::string NormalizeIdaPattern(const std::string &pattern);
 
 // ---------------------------------------------------------------------------
-// TODO(地基-未暴露业务接口)：以下命令尚未实现，前置依赖见 docs/api 与
-// 《MCP工具功能规格》（A–I 九组，共 42 工具）。实现时在此 namespace 新增
-// 对应逻辑，并在 src/executable.cpp SetupMcpCommands() 注册：
-//   - START_PROBE / GET_PROBE_STATUS / GET_PROBE_RESULTS
-//       前置：gProbeResult / ExecuteProbe（L0 编排，已在 src/executable.cpp）
-//   - SELECT_PROCESS / INVALIDATE_PROBE
-//       前置：InvalidateProbeReuse / gSelectedIndex（切进程使旧探针失效）
-//   - START_DUMP / GET_DUMP_STATUS / DUMP_UNREAL_LIBRARY
-//       前置：ExecuteDump / ExecuteDumpUnrealLib / gDumpUiState
-//   - LOCATE_ENGINE_GLOBALS / SCAN_GNAMES / SAMPLE_GNAMES / ANALYZE_CLASS
-//       前置：新建无头 SDKQuery 层（复用 UEWrappers，不依赖 ImGui）
-//   - CALL_REMOTE_FUNCTION_BATCH / ATTACH 系列（F 组）
-//       前置：KittyTraceMgr 接线 + attach 四重兜底 + 取消点（Phase 3.3）
-//   - 长任务 jobId / 长轮询 / brief 分级 / cursor 分页 / adb pull 数据通道
-//     / 流式分块（协议 §8）：需先打通 M2 真机验证后再补（协议已定，代码未完成）
+// TODO(2026-08-31 核对后重写)：下面这份清单**只剩 2 项为真**，此前列的 13 条命令
+// （START_PROBE / GET_PROBE_STATUS / GET_PROBE_RESULTS / SELECT_PROCESS /
+//  START_DUMP / GET_DUMP_STATUS / DUMP_UNREAL_LIBRARY / LOCATE_ENGINE_GLOBALS /
+//  SCAN_GNAMES / SAMPLE_GNAMES / ANALYZE_CLASS / CALL_REMOTE_FUNCTION_BATCH /
+//  ATTACH）已全部注册并实现在 src/executable.cpp SetupMcpCommands()，勿再当成待办。
+// 其中 LOCATE_ENGINE_GLOBALS / SCAN_GNAMES / SAMPLE_GNAMES / ANALYZE_CLASS 走的是
+// **内联 handler** 路线，未新建 SDKQuery 层（见 docs/api/13 §0.3）。
+//
+// 仍未实现：
+//   1. INVALIDATE_PROBE —— 切进程后显式作废旧探针。
+//      注：SELECT_PROCESS 内部已调 InvalidateProbeReuse（executable.cpp 编排层），
+//      缺的只是把它单独暴露成命令。
+//   2. 协议 §8 高级约定：长轮询(waitMs hold) / 日志推送帧 / 心跳 activeJobId /
+//      brief 响应分级 / cursor 分页 / 流式分块 / adb pull 数据通道。
+//      建议：先打通 M2 真机验证再补。
+//      jobId 例外：JobRegistry(:161-208) 已建，DUMP_SDK 已返回 jobId；
+//      START_PROBE / START_DUMP 尚未接入。
 // ---------------------------------------------------------------------------
 }  // namespace UmtMcp

@@ -53,7 +53,9 @@
 
 ⚠️ `__author = "曦曦(DreamFekk)"`、`__notice = "禁止圈钱盗卖"`（`:204-206`）——产物带作者声明。
 
-### 2.2 `DumpOffsetsInfo` 的 GEngine/GWorld 反查（`:289-344`）
+### 2.2 `DumpOffsetsInfo` 的 GEngine/GWorld 反查
+
+> 函数定义在 **`:276`**，下面说的 `:289-344` 是函数**内部**的反查子段，**不是函数范围**。
 
 `FindObject("Class Engine.Engine"/"Class Engine.World")` → `ForEachObject` 找非 CDO 实例 → **`FindAlignedPointerRefrence` 在 `.bss` 反向搜谁指向它**（`:313-327`）→ 得 GEngine/GWorld 全局指针。
 

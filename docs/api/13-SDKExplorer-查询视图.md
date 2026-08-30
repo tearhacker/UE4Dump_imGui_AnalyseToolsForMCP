@@ -1,7 +1,7 @@
 # L6 查询层 API · SDKExplorer（对象浏览器 / 检索 / 容器视图）
 
 > **源码**：`src/SDKExplorer.cpp`（1455 行）/ `SDKExplorer.hpp`（7 行）
-> **定位**：对象浏览器 + 类/字段检索 + 容器视图 + 运行时视图。MCP 的 `searchClasses` / `describeClass` / `inspectObject` 逻辑来源。
+> **定位**：对象浏览器 + 类/字段检索 + 容器视图 + 运行时视图。MCP 的 `SEARCH_CLASSES` / `DESCRIBE_CLASS` / `INSPECT_OBJECT` 的**逻辑来源**（不是调用来源，见 §0.3）。
 > **已精读范围**：1–50（全局状态）+ 590–850（纯逻辑函数全文）。其余为 ImGui UI 渲染（250 处 `ImGui::` 调用，MCP 不依赖）。
 
 ---
@@ -10,11 +10,18 @@
 
 1. **全部逻辑在 `namespace SDKExplorer { namespace { ... } }` 内层匿名 namespace**（`:16-19`），**不可外部调用**。
 2. **状态全在文件级全局**（`:20-48`）：`gPage` / `gPageSize` / `gSearchMode` / `gSearchBuf` / `gFilteredIdx` / `gCachedNeedle` / `gScanCursor` / `gScanning` / `gSelectedObj` / `gInspectObj` / `gTags` / `gBackStack` 等。
-3. ⚠️ **结论（《设备端API清单》L6 已定）**：UI 与状态耦合太深，**不可直接复用，必须另起无头 `SDKQuery` 层**，只搬纯逻辑函数（复用 `UEWrappers`）。
+3. ⚠️ **结论修正（2026-08-31 核对）**：原文写「必须另起无头 `SDKQuery` 层」，**该方案未执行**。
+   实际实现路线是：把 `SEARCH_CLASSES` / `DESCRIBE_CLASS` / `INSPECT_OBJECT` 的 handler **直接内联写在**
+   `src/executable.cpp` 的 `SetupMcpCommands()` 里，复用 `UEWrappers`，**不调用本文件任何函数**。
+   定位方式（别抄行号，命令区会整体位移）：`grep -n 'Register("SEARCH_CLASSES"' src/executable.cpp`，
+   另两条同理。全项目搜索 `SDKQuery` 只剩 `src/mcp/MemoryHelpers.hpp` 的一句 TODO 注释。
+
+   **结果**：本文件与 MCP 是**逻辑同源、代码分叉**的关系。改这里的纯逻辑函数**不会**影响 MCP 行为——
+   两边要同步改。这是当前最大的隐性维护风险。
 
 ---
 
-## 1. 可复用的纯逻辑函数（MCP `SDKQuery` 层的骨架）
+## 1. 可复用的纯逻辑函数（内联 handler 的参照实现）
 
 | 函数 | 签名 | 作用 | 行号 |
 |---|---|---|---|
@@ -80,12 +87,13 @@ if (super) CollectFields(super, out, depth + 1);   // ← 先父类
 
 | # | 陷阱 | 后果 | 应对 |
 |---|---|---|---|
-| 1 | 全部锁匿名 namespace + 文件级全局 | 无法直接调用 | 另起 SDKQuery 层，搬纯逻辑 |
-| 2 | `CollectFields` 递归父类 | 只用 FindChildProp 会漏继承字段 | `describeClass` 用递归模式 |
+| 1 | 全部锁匿名 namespace + 文件级全局 | 无法直接调用 | **已按此绕过**：MCP handler 内联重写，不调用本文件 |
+| 2 | `CollectFields` 递归父类 | 只用 FindChildProp 会漏继承字段 | `DESCRIBE_CLASS` 用递归模式 |
 | 3 | `ReadFieldValue` 数组只回摘要 | inspectObject 拿不到元素 | 容器展开单独实现 |
-| 4 | UI 状态（gPage/gSearchBuf 等）无锁 | 多线程访问竞态 | SDKQuery 层加锁/无状态 |
-| 5 | `CountChildProperties` 上限 4096 | 超限截断 | describeClass 标注"字段过多已截断" |
-| 6 | 搜索是异步（gScanning/gScanCursor） | 状态机复杂 | SDKQuery 层简化为同步+分页 |
+| 4 | UI 状态（gPage/gSearchBuf 等）无锁 | 多线程访问竞态 | **已绕过**：内联 handler 无状态；命令统一主线程串行执行 |
+| 5 | `CountChildProperties` 上限 4096 | 超限截断 | `DESCRIBE_CLASS` 标注"字段过多已截断" |
+| 6 | 搜索是异步（gScanning/gScanCursor） | 状态机复杂 | **已绕过**：内联 handler 改为同步 + 分页 |
+| 7 | 🔴 **逻辑同源但代码分叉** | 改这里不影响 MCP，两边会静默漂移 | 改纯逻辑函数时同步检查 `executable.cpp` 对应 handler |
 
 ---
 

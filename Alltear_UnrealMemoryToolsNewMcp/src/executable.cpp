@@ -1116,9 +1116,16 @@ namespace
     // ---------------------------------------------------------------------
     // MCP 命令注册（服务端）
     //
-    // 三个 MVP 命令全部是快命令（isFast=true），在主线程 Layout_tick_UI 之后
-    // 由 CommandDispatcher::PollOnce() 执行——UMT 全局非线程安全，放主线程
-    // 即与 UI 操作天然串行。
+    // 全部命令都在主线程 Layout_tick_UI 之后由 CommandDispatcher::PollOnce() 执行——
+    // UMT 全局非线程安全，放主线程即与 UI 操作天然串行，无需加锁。
+    //
+    // ⚠️ isFast 目前是【死参数】：Register() 把它存进 CommandDispatcher::fastFlags_，
+    //    但 PollOnce() 从不读取——所有命令一律当场同步执行，跟 isFast 取什么值无关。
+    //    所以耗时命令（SCAN_GNAMES / SCAN_OBJECTS 是分钟级）会同步占满主线程：
+    //      渲染循环停 → PollOnce() 停 → 心跳发不出去 → PC 侧 10s 判超时，表现为"设备端假死"。
+    //    isFast 的【预期】语义保留为：true=同步执行；false=应投递 gWorkerThread。
+    //    要让它真正生效，需在 PollOnce() 里按 fastFlags_ 路由（见 docs/api/12 §5.3.1）。
+    //    在此之前，改这个标志位没有任何运行时效果，别误以为改了就修好了。
     //
     // 本函数定义在匿名 namespace 内部，因此可以直接访问 FindAutoProcessCandidates
     // 与 gDumpUiState。

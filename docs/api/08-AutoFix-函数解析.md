@@ -21,7 +21,10 @@
 |---|---|---|---|
 | 找虚表调用槽位 | `uintptr_t FindVTableCallOffset(uintptr_t functionAddress)` | exec 桩内间接调用的 vtable slot 字节偏移，0=非虚 | `:58-174` |
 | 找直接分支目标 | `uintptr_t FindDirectBranchCallTarget(uintptr_t functionAddress)` | 桩内第一个不自环的 B/BL 绝对目标，0=无 | `:176-225` |
-| 槽位转索引 | `int OffsetToIndex(uintptr_t off)` | `off%8==0 ? off/8 : -1`（inline） | hpp `:16-19` |
+| 槽位转索引 | `int OffsetToIndex(uintptr_t off)` | `off && off%8==0 ? off/8 : -1`（inline） | hpp `:16-19` |
+
+> ⚠️ **别漏 `off &&` 前置条件**：源码是 `(off && (off % 8) == 0) ? (int)(off / 8) : -1`。
+> 少了 `off &&`，`off == 0` 会返回 `0`（合法索引）而不是 `-1`，把"非虚"误判成"第 0 号槽位"。
 | 解析虚表函数 | `uintptr_t ResolveVTableFunction(uintptr_t objectAddress, uintptr_t vtableOffset)` | 读对象 vtable → slot 处函数指针 | `:227-238` |
 
 ### 1.1 `FindVTableCallOffset` —— 寄存器状态机（`:58-174`）
