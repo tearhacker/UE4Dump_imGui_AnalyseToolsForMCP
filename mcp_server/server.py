@@ -7,8 +7,8 @@
     server.py（本文件）      FastMCP 挂载与启动
 
 运行前置条件：
-    1. 手机已 adb 连接，且 UMT 正在运行
-    2. 已执行端口转发：adb forward tcp:35515 tcp:35515
+    1. 手机已连接并授权 USB 调试，且 UMT 正在运行
+    2. PC 侧会自动建立并维护 adb forward，无需人工输入命令
 
 启动：
     python server.py
@@ -111,12 +111,12 @@ def main() -> None:
         adb.set_adb_bin(args.adb)
     config.DEFAULT_PORT = args.port
 
-    # 启动前做一次 adb 可用性 + 端口转发前置检查（失败仅告警，不阻断启动）
+    # 启动时预热一次；USB 晚插入或隧道丢失时，bridge 会在连接前继续自动恢复。
     ok, msg = adb.setup(args.port)
     if not ok:
-        logger.warning("adb 前置检查未通过（可稍后手动执行 adb forward）: %s", msg)
+        logger.warning("ADB 自动连接预热暂未完成，首次工具调用会继续自动重试: %s", msg)
     else:
-        logger.info("%s", msg)
+        logger.info("ADB 无感连接已就绪: %s", msg.replace("\n", "；"))
 
     problems = tools.self_check()
     if problems:

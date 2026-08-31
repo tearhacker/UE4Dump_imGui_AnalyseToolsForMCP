@@ -32,7 +32,7 @@ import time
 from collections import deque
 from typing import Any
 
-from . import config, protocol as proto
+from . import adb, config, protocol as proto
 
 logger = logging.getLogger(__name__)
 
@@ -42,10 +42,17 @@ class UmtBridge:
     def __init__(
         self,
         host: str = config.HOST,
-        port: int = config.DEFAULT_PORT,
+        port: int | None = None,
+        *,
+        auto_forward: bool | None = None,
     ) -> None:
         self._host = host
-        self._port = port
+        self._port = config.DEFAULT_PORT if port is None else port
+        self._auto_forward = (
+            host == config.HOST and port is None
+            if auto_forward is None
+            else auto_forward
+        )
 
         self._sock: socket.socket | None = None
         self._reader: threading.Thread | None = None
@@ -110,7 +117,7 @@ class UmtBridge:
         while True:
             attempt += 1
             try:
-                self._connect_once()
+                self._connect_once(force_forward=attempt > 1)
                 return
             except (OSError, proto.UmtError) as exc:
                 last_exc = exc
@@ -134,13 +141,21 @@ class UmtBridge:
 
         raise proto.UmtConnectionError(
             f"无法连接设备端 {self._host}:{self._port}（已试 {attempt} 次）。\n"
-            f"请确认：1) 手机已 adb 连接  2) 已执行 "
-            f"`adb forward tcp:{self._port} tcp:{self._port}`  "
-            f"3) UMT 已启动并在运行\n"
+            f"PC 侧已自动检查并建立 adb forward，无需手工输入命令。\n"
+            f"请确认：1) 手机已连接并授权 USB 调试  2) UMT 已启动并在运行\n"
             f"底层错误：{last_exc}"
         )
 
-    def _connect_once(self) -> None:
+    def _connect_once(self, *, force_forward: bool = False) -> None:
+        if self._auto_forward:
+            ok, message = adb.setup(self._port, force=force_forward)
+            if not ok:
+                raise proto.UmtConnectionError(
+                    f"ADB 无感连接暂未就绪：{message}。"
+                    "后续 MCP 调用会继续自动重试，无需手工执行 adb forward。"
+                )
+            logger.debug("%s", message.replace("\n", "；"))
+
         self._stop.clear()
         self._handshake.clear()
         self._handshake_event.clear()

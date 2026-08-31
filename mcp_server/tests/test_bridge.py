@@ -166,6 +166,80 @@ def test_handshake_succeeds(bridge: br.UmtBridge, device: MockDevice) -> None:
     assert device.received == []
 
 
+def test_auto_forward_runs_before_socket_connect(
+    device: MockDevice, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    calls: list[tuple[int, bool]] = []
+
+    def fake_setup(port: int, *, force: bool = False) -> tuple[bool, str]:
+        calls.append((port, force))
+        return True, "ready"
+
+    monkeypatch.setattr(br.adb, "setup", fake_setup)
+    b = br.UmtBridge(host="127.0.0.1", port=device.port, auto_forward=True)
+    try:
+        b.connect()
+        assert calls == [(device.port, False)]
+        assert b.connected
+    finally:
+        b.close()
+
+
+def test_default_bridge_reads_runtime_config_port(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(config, "DEFAULT_PORT", 45678)
+
+    b = br.UmtBridge(auto_forward=False)
+
+    assert b._port == 45678
+
+
+def test_retry_force_refreshes_auto_forward(
+    device: MockDevice, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    setup_calls: list[tuple[int, bool]] = []
+    socket_attempts = 0
+    real_create_connection = br.socket.create_connection
+
+    def fake_setup(port: int, *, force: bool = False) -> tuple[bool, str]:
+        setup_calls.append((port, force))
+        return True, "ready"
+
+    def flaky_create_connection(*args, **kwargs):
+        nonlocal socket_attempts
+        socket_attempts += 1
+        if socket_attempts == 1:
+            raise ConnectionRefusedError("stale adb tunnel")
+        return real_create_connection(*args, **kwargs)
+
+    monkeypatch.setattr(br.adb, "setup", fake_setup)
+    monkeypatch.setattr(br.socket, "create_connection", flaky_create_connection)
+    monkeypatch.setattr(config, "RECONNECT_BASE_DELAY", 0.0)
+
+    b = br.UmtBridge(host="127.0.0.1", port=device.port, auto_forward=True)
+    try:
+        b.connect(max_attempts=2)
+        assert setup_calls == [(device.port, False), (device.port, True)]
+        assert b.connected
+    finally:
+        b.close()
+
+
+def test_auto_forward_failure_never_requires_manual_command(monkeypatch) -> None:
+    monkeypatch.setattr(
+        br.adb,
+        "setup",
+        lambda port, *, force=False: (False, "没有检测到在线设备"),
+    )
+    b = br.UmtBridge(port=35515, auto_forward=True)
+
+    with pytest.raises(proto.UmtConnectionError) as exc:
+        b.connect(max_attempts=1)
+
+    message = str(exc.value)
+    assert "已自动检查并建立 adb forward" in message
+    assert "无需手工输入命令" in message
+
+
 def test_first_command_is_sent_without_auth(device: MockDevice) -> None:
     """HELLO 之后首个命令直接发送，不夹带 AUTH 或 token。"""
     b = br.UmtBridge(host="127.0.0.1", port=device.port)

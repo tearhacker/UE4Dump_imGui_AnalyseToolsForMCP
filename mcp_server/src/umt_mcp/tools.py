@@ -93,7 +93,7 @@ def _dev(tool_name: str, timeout: float | None = None, **args: Any) -> str:
 def ping() -> str:
     """连通性检查。返回设备端 build / 协议版本 / 连接状态。
 
-    排障第一步：连不上先跑 adb forward 再试。
+    PC 侧会在连接前自动建立 adb forward，断线重试时自动刷新隧道。
     """
     return _dev("ping")
 

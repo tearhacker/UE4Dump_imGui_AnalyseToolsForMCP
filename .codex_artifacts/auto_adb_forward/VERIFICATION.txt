@@ -1,0 +1,107 @@
+CHANGED_BRANCH_FIELD
+Git branch: main
+Fields: adb.ensure_forward(force); adb.setup(force); UmtBridge auto_forward; reconnect force refresh; startup prewarm; Windows hidden ADB subprocess.
+
+ARTIFACT_PATHS
+MODIFIED_FILE: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\auto_adb_forward\MODIFIED_FILE.py
+DIFF_FILE: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\auto_adb_forward\AUTO_ADB_FORWARD.diff
+VERIFICATION: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\auto_adb_forward\VERIFICATION.txt
+ROLLBACK: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\auto_adb_forward\ROLLBACK.sh
+
+ORIGINAL_SHA256
+7ED0F4B8D422C471576F14BC7186EE8A95A265D538D37178BADD577347032D6F  mcp_server/src/umt_mcp/adb.py
+0F900AA36C6F9358619A40B1829EA647046434B0A4785F26454FAB46D4EEF91B  mcp_server/src/umt_mcp/bridge.py
+16018A513C7E50EB3A7D216664992550C5E5600D5614D1A31EECB8049DF3AA02  mcp_server/server.py
+59CE8474A1139B8B325F08F37657C9235CD8D11731E52355FAB831CEFFEED588  mcp_server/tests/test_bridge.py
+4A2530AE92BD9B3996E085094980920C732C1B0B644B21B6A300A7B17677966B  mcp_server/README.md
+5B9A3CEA1431862346B3382F5A1F0D73F01B07610C24DC899B6889E89352DF84  mcp_server/src/umt_mcp/tools.py
+3D1DD064D253D5BEAD0EAD139932BAB6A7570802469A357669DAFC307F54EEA4  mcp_server/src/umt_mcp/resources.py
+B547CDF753B5BBC73602126311EAC9690862A859B1AA9FBFF1537F58A4001163  mcp_server/src/umt_mcp/instructions.py
+
+MODIFIED_SHA256
+CDF8DC805A12A62FD25B23C5C4C062849F498219BF27CA8F8A03C4346A0880F7  mcp_server/src/umt_mcp/adb.py
+64CA916140443CED0CF087367041ABD9CD022976D9B0A8774A5127B9A86548F7  mcp_server/src/umt_mcp/bridge.py
+519EF856881CB4DDC5049847D9E8B06FB0DE14F9EBE587B733A4C46B68DD1B55  mcp_server/server.py
+A2189FB39CB9262B4C4CB5D43827C8011D4EAE1B2BBF798C674F9181F8AECF45  mcp_server/tests/test_adb.py
+E27CE6E7EFFA070C38C96662601BE61C47E8E5491E3226BDECAAFC7BEA93F0C0  mcp_server/tests/test_bridge.py
+1872EA9D718C3CF9932C15E881D667980EBAD0BD574DD13FF5796EDEA479BDCB  mcp_server/README.md
+6DE4B6D2AC7BFBABA3D4CFCB85A7D38FBCC1FFD87A517B9E89C2ED3395B0ADCF  mcp_server/src/umt_mcp/tools.py
+09657BEAE96765FC9E7FA1421DB7ADC09D06B399CA15722BE59FB5000CA25055  mcp_server/src/umt_mcp/resources.py
+5BDE699508FCC20298B07BC12FCBFFE7B85A0695E2908A250741284622089C2E  mcp_server/src/umt_mcp/instructions.py
+
+BASELINE
+COMMAND: & '.venv\Scripts\python.exe' -m pytest tests -q
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server
+INPUT: Token-free MCP bridge before automatic ADB lifecycle integration.
+LITERAL_OUTPUT:
+..........................................                               [100%]
+42 passed in 5.60s
+EXIT_STATUS: 0
+RESULT: Baseline suite passed; adb forward was attempted only once during MCP startup and bridge reconnect did not repair it.
+
+LIVE_ADB_BASELINE
+COMMAND: & 'C:\Program Files\platform-tools\adb.exe' devices -l; & 'C:\Program Files\platform-tools\adb.exe' forward --list
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear
+INPUT: Current local ADB state before modified behavior verification.
+LITERAL_OUTPUT:
+* daemon not running; starting now at tcp:5037
+* daemon started successfully
+List of devices attached
+DEVICES_EXIT: 0
+FORWARD_LIST_EXIT: 0
+EXIT_STATUS: 0
+RESULT: ADB daemon started successfully; no Android device was attached, so no real-device forward could be created in this run.
+
+MODIFIED
+COMMAND: & '.venv\Scripts\python.exe' -m pytest tests -q
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server
+INPUT: Automatic ADB setup, hidden subprocess, idempotent forward, forced retry refresh, and updated bridge tests.
+LITERAL_OUTPUT:
+...................................................                      [100%]
+51 passed in 5.64s
+EXIT_STATUS: 0
+RESULT: Full suite passed. Tests cover forward creation, exact existing-forward reuse, forced refresh, offline device handling, pre-connect setup, reconnect refresh, and runtime configured port selection.
+
+MODIFIED_COMPILE
+COMMAND: & 'C:\Program Files\Python310\python.exe' -m py_compile server.py src\umt_mcp\adb.py src\umt_mcp\bridge.py tests\test_adb.py tests\test_bridge.py
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server
+INPUT: Modified production and test Python files using the interpreter from the MCP client JSON.
+LITERAL_OUTPUT:
+(no output)
+EXIT_STATUS: 0
+RESULT: All changed Python modules compiled successfully with the configured interpreter.
+
+CONFIG_VALIDATION
+COMMAND: Parse 客户端AI工具配置MCP文件.json with ConvertFrom-Json and inspect command/args.
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server
+INPUT: Existing client configuration, unchanged by this task.
+LITERAL_OUTPUT:
+CONFIG_COMMAND: C:/Program Files/Python310/python.exe
+CONFIG_ARGS: D:/泪心安卓领域基本盘技术/ue4ImGuiAutoWorkingMcpBytear/mcp_server/server.py | --port | 35515 | --adb | C:/Program Files/platform-tools/adb.exe
+CONFIG_HAS_ADB: True
+CONFIG_HAS_PORT: True
+EXIT_STATUS: 0
+RESULT: Existing configuration already supplies everything required for automatic forwarding; no new setting is needed.
+
+ROLLBACK
+COMMAND: & 'D:\ProgramerDevelop\Git\bin\bash.exe' '.codex_artifacts/auto_adb_forward/ROLLBACK.sh' 'D:/泪心安卓领域基本盘技术/ue4ImGuiAutoWorkingMcpBytear/.codex_artifacts/auto_adb_forward/rollback_test_workspace'
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear
+INPUT: A separate root containing fresh copies of all nine modified files plus protocol.py for the no-Token invariant check.
+LITERAL_OUTPUT:
+ROLLBACK_RESULT: restored
+RESTORED_ADB_SHA256: 7ED0F4B8D422C471576F14BC7186EE8A95A265D538D37178BADD577347032D6F
+RESTORED_BRIDGE_SHA256: 0F900AA36C6F9358619A40B1829EA647046434B0A4785F26454FAB46D4EEF91B
+RESTORED_SERVER_SHA256: 16018A513C7E50EB3A7D216664992550C5E5600D5614D1A31EECB8049DF3AA02
+RESTORED_TOKEN_STATE: token authentication remains removed.
+RESTORED_BEHAVIOR: adb forward returns to startup-only best effort; bridge no longer refreshes it before connect/reconnect.
+ROLLBACK_EXIT_STATUS: 0
+EXIT_STATUS: 0
+RESULT: Automatic ADB behavior was removed on the copy, core source hashes were restored, the new test file was deleted, and prior token-removal behavior remained intact. Main workspace stays modified.
+
+CURRENT_MODIFIED_BEHAVIOR
+MCP startup silently prewarms ADB and the tcp:35515 forward.
+Every production bridge connection checks the forward before opening the socket.
+The first retry force-refreshes adb forward to repair stale or lost tunnels.
+If the phone is connected later, the next MCP call retries setup automatically.
+Windows ADB subprocesses use CREATE_NO_WINDOW.
+The existing MCP client JSON needs no manual adb command and no additional field.

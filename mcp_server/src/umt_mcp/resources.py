@@ -59,7 +59,7 @@ def get_config_summary() -> str:
         f"服务器名: {config.SERVER_NAME}\n"
         f"版本: {config.SERVER_VERSION}\n"
         f"设备端地址: {config.HOST}:{config.DEFAULT_PORT}\n"
-        f"adb forward: tcp:{config.DEFAULT_PORT} → tcp:{config.DEFAULT_PORT}\n"
+        f"adb forward: 自动维护 tcp:{config.DEFAULT_PORT} → tcp:{config.DEFAULT_PORT}\n"
         f"心跳间隔: {config.HEARTBEAT_INTERVAL}s\n"
         f"心跳超时: {config.HEARTBEAT_TIMEOUT}s\n"
         f"命令硬超时: {config.CMD_TIMEOUT}s\n"

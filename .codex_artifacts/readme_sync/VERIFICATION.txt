@@ -1,0 +1,80 @@
+CHANGED_BRANCH_FIELD
+Git branch: main
+Field: mcp_server/README.md synchronized with current no-Token, automatic-ADB, 43-tool, 4-resource, 51-test implementation.
+
+ARTIFACT_PATHS
+MODIFIED_FILE: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\readme_sync\MODIFIED_FILE.md
+DIFF_FILE: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\readme_sync\README_SYNC.diff
+VERIFICATION: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\readme_sync\VERIFICATION.txt
+ROLLBACK: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\readme_sync\ROLLBACK.sh
+
+SOURCE_PATH
+D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server\README.md
+
+ORIGINAL_SHA256
+1872EA9D718C3CF9932C15E881D667980EBAD0BD574DD13FF5796EDEA479BDCB  mcp_server/README.md
+
+MODIFIED_SHA256
+DC0B6E223216D5BA693AF98EA6AB2966AF0022F62803BAB329B35280DF29648A  mcp_server/README.md
+
+BASELINE
+COMMAND: & '.venv\Scripts\python.exe' -m pytest tests -q
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server
+INPUT: Existing README and current implementation before documentation synchronization.
+LITERAL_OUTPUT:
+...................................................                      [100%]
+51 passed in 5.63s
+EXIT_STATUS: 0
+RESULT: Current implementation baseline passed all tests before the documentation-only edit.
+
+MODIFIED
+COMMAND: & '.venv\Scripts\python.exe' -m pytest tests -q
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server
+INPUT: Updated README; production and test source code unchanged.
+LITERAL_OUTPUT:
+...................................................                      [100%]
+51 passed in 5.61s
+EXIT_STATUS: 0
+RESULT: All implementation tests still pass after the documentation-only edit.
+
+MARKDOWN_VALIDATION
+COMMAND: Read README.md; count fenced-code markers; resolve every relative Markdown link; scan stale implementation text.
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear
+INPUT: Updated mcp_server/README.md.
+LITERAL_OUTPUT:
+CODE_FENCES: 14
+LOCAL_LINKS_BROKEN: 0
+STALE_TEXT_SCAN: clean
+README_DIFF_CHECK: clean
+EXIT_STATUS: 0
+RESULT: Markdown fences are balanced, local links exist, known stale statements are absent, and the diff has no whitespace errors.
+
+DOCUMENTED_CODE_FACTS
+SERVER_NAME: unreal-memory-tools
+SERVER_VERSION: 0.1.0
+PROTOCOL_VERSION: 1
+DEFAULT_PORT: 35515
+TOOL_COUNT: 43
+DEVICE_PARAMS_COUNT: 43
+SELF_CHECK: []
+RESOURCE_COUNT: 4
+TEST_COUNT: 51
+PYTHON: 3.10.5
+ADB: 1.0.41 / 37.0.1-15733141
+AUTHENTICATION: no Token and no AUTH frame
+ADB_FORWARD: startup prewarm, pre-connect check, forced refresh on retry
+
+ROLLBACK
+COMMAND: & 'D:\ProgramerDevelop\Git\bin\bash.exe' '.codex_artifacts/readme_sync/ROLLBACK.sh' 'D:/泪心安卓领域基本盘技术/ue4ImGuiAutoWorkingMcpBytear/.codex_artifacts/readme_sync/rollback_test_workspace'
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear
+INPUT: A separate root containing a fresh copy of the modified README.
+LITERAL_OUTPUT:
+ROLLBACK_RESULT: restored
+RESTORED_README_SHA256: 1872EA9D718C3CF9932C15E881D667980EBAD0BD574DD13FF5796EDEA479BDCB
+RESTORED_BEHAVIOR: README returns to the pre-sync automatic-ADB documentation; source code is untouched.
+ROLLBACK_EXIT_STATUS: 0
+EXIT_STATUS: 0
+RESULT: The README copy was restored byte-for-byte to the task baseline; the main workspace remains updated.
+
+CURRENT_DOCUMENTATION
+README now contains the current implementation snapshot, verified install/run commands, checked-in MCP client JSON, automatic connection lifecycle, 43-tool catalog, 4-resource semantics, test evidence, and code-aligned limitations.
