@@ -206,6 +206,16 @@ bool CommandServer::HandleFrame(int sock, const std::string &line)
 
     // 入队,交给主线程执行
     json args = req.contains("args") && req["args"].is_object() ? req["args"] : json::object();
+
+    // 🔴 让 IMGUI 日志能看到「AI 调了哪个工具/函数」——否则界面里只剩连接上下线刷屏
+    {
+        std::string argsSummary = args.dump();
+        if (argsSummary.size() > 240)
+            argsSummary = argsSummary.substr(0, 240) + "...(已截断)";
+        LOGI("[MCP·调用] %s  id=%llu  args=%s",
+             cmd.c_str(), (unsigned long long)id, argsSummary.c_str());
+    }
+
     queue_->PushRequest({id, cmd, args.dump()});
 
     // 同步等待响应(期间持续发心跳,让 PC 侧区分「在算」与「死了」)
@@ -305,7 +315,7 @@ void CommandServer::ServerLoop()
         if (clientFd < 0)
             continue;
 
-        LOGI("[MCP] 客户端已连接");
+        LOGI("[MCP·连接] 客户端已连接");
         // 🔴 新连接:清空队列,丢弃上一连接的未消费响应(防止孤儿响应污染)
         CommandDispatcher::Clear();
 
@@ -390,7 +400,7 @@ void CommandServer::ServerLoop()
         }
 
         ::close(clientFd);
-        LOGI("[MCP] 客户端断开");
+        LOGI("[MCP·连接] 客户端断开");
     }
 
     ::close(serverFd);

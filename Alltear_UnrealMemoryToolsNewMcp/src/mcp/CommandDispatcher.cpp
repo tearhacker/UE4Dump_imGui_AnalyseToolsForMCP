@@ -103,6 +103,9 @@ bool CommandDispatcher::PollOnce()
         handler = it->second;
     }
 
+    // 🔴 让 IMGUI 日志能看到「正在执行哪个命令」
+    LOGI("[MCP·执行] %s", req.cmd.c_str());
+
     // 执行（快命令当场执行；重活由 START_* 命令的 handler 内部投 gWorkerThread 并短等）
     try
     {
@@ -136,6 +139,11 @@ bool CommandDispatcher::PollOnce()
     {
         LOGE("[MCP] 命令 %s 耗时 %lldms 超过硬超时 %ds —— 该命令不应标记为快命令",
              req.cmd.c_str(), (long long)elapsedMs, kCommandTimeoutSec);
+    }
+    else
+    {
+        // 🔴 正常完成也打一行，和「·调用/·执行」配成闭环，IMGUI 日志里一眼能看清在做什么
+        LOGI("[MCP·完成] %s  耗时 %lldms", req.cmd.c_str(), (long long)elapsedMs);
     }
 
     queue_->PushResponse({req.id, response.dump()});

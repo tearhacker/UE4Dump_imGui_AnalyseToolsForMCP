@@ -57,6 +57,9 @@ static std::string GetLanIp();
 
 #include <nlohmann/json.hpp>
 
+    // 日志面板过滤开关：勾选后隐藏 MCP 连接上下线（[MCP·连接]）这类刷屏日志
+    bool gHideMcpConnLogs = false;
+
 std::vector<IGameProfile *> UE_Games = {
     new ArenaBreakoutProfile(),
     new DeltaForceProfile(),
@@ -458,6 +461,8 @@ namespace
         return "// 创作者: 曦曦(DreamFekk) https://github.com/DreamFekk\n"
                "// 禁止圈钱盗卖\n\n";
     }
+
+
 
     void PushUiLog(char level, const std::string &message)
     {
@@ -3934,7 +3939,6 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
     ImGui::PushStyleColor(ImGuiCol_Separator, ImVec4(0.20f, 0.26f, 0.37f, 0.90f));
 
     const float sidebarWidth = 180.0f;
-    const float topBarHeight = 92.0f;
     const float leftColumnWidth = 320.0f;
     const float middleColumnWidth = 310.0f;
 
@@ -3960,42 +3964,12 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
         ImGui::SetCursorPosY(sidebarFooter);
     ImGui::Separator();
     ImGui::TextDisabled("%s %s", Tr("版本", "Version"), kUEDUMPER_VERSION);
-    ImGui::TextDisabled("%s", Tr("禁止盗卖圈钱", "No reselling for profit"));
+    ImGui::TextDisabled("%s", Tr("泪心二改版", "TearHacker Fork"));
     ImGui::EndChild();
 
     ImGui::SameLine(0.0f, 14.0f);
 
     ImGui::BeginChild("##workspace", ImVec2(0.0f, 0.0f), false);
-    if (navPage == NavOverview)
-    {
-        ImGui::BeginChild("##topbar", ImVec2(0.0f, topBarHeight), true);
-        ImGui::Text("%s", Tr("总览面板", "Overview"));
-        ImGui::TextDisabled("%s", Tr("总览面板", "Overview"));
-        if (!selectedPackage.empty())
-        {
-            ImGui::TextDisabled("%s: %s", Tr("当前目标", "Current target"), selectedPackage.c_str());
-        }
-        else
-        {
-            ImGui::TextDisabled("%s", Tr("当前未选择进程", "No process selected"));
-        }
-
-        const float rightStart = ImGui::GetWindowWidth() - 320.0f;
-        if (rightStart > 0.0f)
-            ImGui::SameLine(rightStart);
-        if (busy)
-            drawStatusChip(Tr("运行中", "Busy"), ImVec4(0.85f, 0.55f, 0.16f, 0.95f));
-        else
-            drawStatusChip(Tr("空闲", "Idle"), ImVec4(0.18f, 0.63f, 0.42f, 0.95f));
-        ImGui::SameLine(0.0f, 10.0f);
-        if (ImGui::Button("ZH", ImVec2(52.0f, 0.0f))) gUiLang = UiLang::ZH;
-        ImGui::SameLine(0.0f, 6.0f);
-        if (ImGui::Button("EN", ImVec2(52.0f, 0.0f))) gUiLang = UiLang::EN;
-        ImGui::EndChild();
-
-        ImGui::Dummy(ImVec2(0.0f, 12.0f));
-    }
-
     if (navPage == NavMcp)
     {
         ImGui::BeginChild("##mcp_workspace", ImVec2(0.0f, 0.0f), true);
@@ -4090,11 +4064,19 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
             std::lock_guard<std::mutex> lock(gDumpUiState.mutex);
             gDumpUiState.logLines.clear();
         }
+        ImGui::SameLine();
+        ImGui::Checkbox(Tr("隐藏 MCP 连接上下线", "Hide MCP connect/disconnect"),
+                        &gHideMcpConnLogs);
         ImGui::Dummy(ImVec2(0.0f, 6.0f));
         if (ImGui::BeginChild("##logs_scroll", ImVec2(0.0f, 0.0f), false, ImGuiWindowFlags_HorizontalScrollbar))
         {
             for (const auto &line : logLines)
+            {
+                // 勾选「隐藏连接上下线」后，过滤掉 [MCP·连接] 这类刷屏行
+                if (gHideMcpConnLogs && line.find("[MCP·连接]") != std::string::npos)
+                    continue;
                 ImGui::TextUnformatted(line.c_str());
+            }
 
             if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY())
                 ImGui::SetScrollHereY(1.0f);
@@ -4126,13 +4108,10 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
         ImGui::Dummy(ImVec2(0.0f, 10.0f));
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, 8.0f));
-        ImGui::Text("%s: 曦曦(DreamFekk)", Tr("创作者", "Author"));
-        ImGui::TextColored(ImVec4(0.78f, 0.16f, 0.20f, 1.0f), "%s: 泪心(tearhacker)",
-                           Tr("贡献者", "Contributor"));
+        ImGui::Text("%s: 曦曦(DreamFekk)    %s: 泪心(tearhacker)", Tr("创作者", "Author"), Tr("贡献者", "Contributor"));
         ImGui::TextWrapped("GitHub: https://github.com/DreamFekk");
         ImGui::TextWrapped("%s: %s", Tr("输出目录", "Output"), kOutputDirectory);
-        ImGui::TextWrapped("%s: %s", Tr("渲染接口", "Renderer"), graphics->RenderName);
-        ImGui::Text("%s: %.1f", Tr("当前 FPS", "Current FPS"), ImGui::GetIO().Framerate);
+        ImGui::Text("%s: %s    %s: %.1f", Tr("渲染接口", "Renderer"), graphics->RenderName, Tr("当前 FPS", "FPS"), ImGui::GetIO().Framerate);
 
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
         ImGui::Separator();
