@@ -15,6 +15,9 @@
 #include <unordered_set>
 #include <vector>
 
+// 查询设备当前 Wi-Fi 局域网 IP（root 环境下直接调原生 ip 命令；用于模式 1 连接提示）
+static std::string GetLanIp();
+
 #include "Utils/Logger.hpp"
 #include "Utils/ProgressUtils.hpp"
 
@@ -4005,16 +4008,49 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
         ImGui::TextDisabled("%s", Tr("监听地址", "Listen Address"));
-        // 反映运行期实际值：默认 127.0.0.1，写了 mcp_bind.conf 后会变成配置的地址
-        ImGui::Text("%s:%d", UmtMcp::CommandServer::GetBindAddress().c_str(),
-                    static_cast<int>(UmtMcp::kDefaultPort));
-        // 非回环即放开到网络，UI 上给红色警告，避免用户忘了自己改过配置
-        if (UmtMcp::CommandServer::GetBindAddress() != UmtMcp::kBindAddress)
-        {
-            ImGui::TextColored(ImVec4(0.92f, 0.36f, 0.36f, 1.0f), "%s",
-                               Tr("已暴露到网络，仅在可信网络下使用",
-                                  "Exposed to network; trusted networks only"));
-        }
+        // 运行期实际 bind 地址：默认 127.0.0.1，写过 mcp_bind.conf 后变为配置值
+        const std::string &bindAddr = UmtMcp::CommandServer::GetBindAddress();
+        ImGui::Text("%s:%d", bindAddr.c_str(), static_cast<int>(UmtMcp::kDefaultPort));
+
+        // 三种监听模式按 bind 地址判定当前生效项（设备侧只能看到 bind 地址，adb 隧道是 PC 端概念）
+        //  - 回环 127.0.0.1 / localhost / ::1      → 模式 3 本机 Operit 同机直连，无需 adb，最安全
+        //  - 全局 0.0.0.0 / ::                     → 模式 2 全局监听，连蜂窝/rmnet 也暴露，最危险
+        //  - 其它具体地址（如 192.168.x.x）         → 模式 1 局域网/指定网卡直连
+        // UI 上把三种模式都列出来，并用颜色 + "◀ 当前生效" 标出当前那一个
+        const bool isLoopback = (bindAddr == "127.0.0.1" || bindAddr == "localhost" ||
+                                 bindAddr == "::1" || bindAddr == "0:0:0:0:0:0:0:1");
+        const bool isGlobal = (bindAddr == "0.0.0.0" || bindAddr == "::" ||
+                               bindAddr == "::0" || bindAddr == "[::]");
+        const int activeMode = isLoopback ? 3 : (isGlobal ? 2 : 1);
+        auto drawModeRow = [&](int mode, const char *zh, const char *en, const ImVec4 &color) {
+            if (mode == activeMode)
+                ImGui::TextColored(color, "%s   ◀ %s", Tr(zh, en),
+                                   Tr("当前生效", "active"));
+            else
+                ImGui::TextDisabled("%s", Tr(zh, en));
+        };
+        drawModeRow(3, "模式 3 · 本机回环（Operit 同机直连，无需 ADB 隧道）",
+                       "Mode 3 - Loopback (same-device Operit, no ADB tunnel)",
+                       ImVec4(0.36f, 0.92f, 0.45f, 1.0f));
+        drawModeRow(2, "模式 2 · 全局监听 0.0.0.0（含蜂窝网络，仅绝对可信环境使用）",
+                       "Mode 2 - Global 0.0.0.0 (incl. cellular; trusted env only)",
+                       ImVec4(0.92f, 0.36f, 0.36f, 1.0f));
+        drawModeRow(1, "模式 1 · 局域网/指定地址直连（仅该网卡可达，注意局域网内其它设备）",
+                       "Mode 1 - LAN/specified-address direct (one NIC only; mind other LAN devices)",
+                       ImVec4(0.95f, 0.78f, 0.36f, 1.0f));
+
+        // 设备当前局域网 IP：模式 1 时 PC 端客户端要填的连接地址（root 直接查）
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::TextDisabled("%s", Tr("本机局域网 IP（模式 1 连接地址）",
+                                     "Device LAN IP (Mode 1 connect address)"));
+        const std::string lanIp = GetLanIp();
+        if (lanIp.empty())
+            ImGui::TextColored(ImVec4(0.95f, 0.78f, 0.36f, 1.0f), "%s",
+                               Tr("未获取到，请确认 Wi-Fi 已连接", "Not available; ensure Wi-Fi is up"));
+        else
+            ImGui::Text("%s", lanIp.c_str());
+        ImGui::TextDisabled("%s", Tr("把以上地址写入 mcp_bind.conf 即切换为模式 1",
+                                     "Write this address into mcp_bind.conf to switch to Mode 1"));
 
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
         ImGui::TextDisabled("%s", Tr("连接方式", "Connection"));
@@ -4200,6 +4236,34 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
     ImGui::PopStyleVar(7);
 }
 
+
+// 查询设备当前 Wi-Fi 局域网 IP（root 环境下直接调用原生 ip 命令，无需手动查）
+// 解析 `ip -4 addr show wlan0` 输出里的 "inet A.B.C.D/24"，提取 A.B.C.D
+static std::string GetLanIp()
+{
+    std::string ip;
+    FILE *fp = popen("ip -4 addr show wlan0 2>/dev/null", "r");
+    if (fp)
+    {
+        char buf[512];
+        while (fgets(buf, sizeof(buf), fp))
+        {
+            const char *p = strstr(buf, "inet ");
+            if (!p) continue;
+            p += 5;  // 跳过 "inet "
+            const char *end = strchr(p, '/');
+            if (!end) end = p + strcspn(p, " \t\r\n");
+            const size_t len = static_cast<size_t>(end - p);
+            if (len > 0 && len < 64)
+            {
+                ip.assign(p, len);
+                break;
+            }
+        }
+        pclose(fp);
+    }
+    return ip;
+}
 
 int main()
 {
