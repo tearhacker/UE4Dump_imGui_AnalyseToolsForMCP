@@ -194,26 +194,40 @@ int main() {
 **结论：43 条命令全部在主线程同步执行，`isFast` 目前只是注释，改它没有任何运行时效果。**
 （`SCAN_PATTERN` 标了 `false` 并附注释「扫描可能慢，标为重活」，但同样不会被投到 worker。）
 
-#### 由此产生的真实风险
+#### 由此产生的真实风险（🔴 2026-08-31 二次核对修正）
 
-命令里但凡有耗时操作（`SCAN_GNAMES` / `SCAN_OBJECTS` 是分钟级），会**同步占满主线程**：
+耗时命令会**同步占满主线程**：
 
 ```
-handler 同步跑几百毫秒~数分钟
-  → ImGui 渲染循环停 → PollOnce() 停 → 心跳发不出去
-  → PC 侧 10s 判超时 → 误判"设备端假死"
+handler 同步跑几秒~几十秒
+  → ImGui 渲染循环停 → **设备端界面冻住**（用户可见）
+  → 若超过 kCommandTimeoutSec(120s)，CommandServer 直接返 E_TIMEOUT，结果丢弃
 ```
 
-#### 已知会被拖住的 6 条（当前 `isFast` 实参均为 `true`）
+⚠️ **但心跳不会停，PC 侧不会误判假死。**
+心跳由 `CommandServer` **线程**在 `HandleFrame` 的等待循环里发
+（`CommandServer.cpp:255`），与主线程是否繁忙**无关**。
+（本文件此前写过「心跳停 → PC 侧 10s 判超时」，**该说法是错的，已删除**。）
 
-| 命令 | 风险 |
-|---|---|
-| `SCAN_GNAMES` | 🔴 **分钟级** |
-| `SCAN_OBJECTS` | 🔴 **分钟级** |
-| `ANALYZE_CLASS` | 🟠 内部启 probe+dump，耗时不可控 |
-| `CALL_REMOTE_FUNCTION` | 🟠 ptrace attach 会冻结目标进程 |
-| `BEGIN_ATTACH_SESSION` | 🟠 同上 |
-| `WRITE_MEMORY` | 🟡 需先校验整段映射可写 |
+#### 哪些命令真慢 —— 必须看实现，不能照协议文档的字面描述
+
+🔴 **重要纠正**：协议文档 §6/§7 把 `SCAN_GNAMES` / `SCAN_OBJECTS` 标为「分钟级」，
+那是按"从零全网扫描"的语义写的，**与当前实现不符**。实际两者都复用
+`START_PROBE` 已解析出的指针，只采样 16 条做自校验，**是毫秒级**，标 `isFast=true` 正确。
+
+| 命令 | 实际耗时来源 | 当前 isFast |
+|---|---|---|
+| `SCAN_PATTERN` | 扫最多 512MB（`kMaxScan`） | `false` ✅ |
+| `SEARCH_CLASSES` | `ForEachObjectOfClass` 遍历整个 GUObjectArray | `false` ✅ |
+| `SCAN_CANDIDATES` | 按 `getAllMaps` 扫内存区域 | `false` ✅ |
+| `LOCATE_ENGINE_GLOBALS` | 多步编排 | `false` ✅ |
+| `START_PROBE` / `START_DUMP` / `DUMP_SDK` | **自己投 `gWorkerThread`**，命令立即返回 | `false` |
+| `SCAN_GNAMES` / `SCAN_OBJECTS` | 复用已解析指针 + 采样 16 条 → 毫秒级 | `true` ✅ |
+| `CALL_REMOTE_FUNCTION` / `BEGIN_ATTACH_SESSION` | ptrace attach，百毫秒级 | `true` ✅ |
+
+**结论修正**：慢命令基本都已标了 `false`，分级标注本身是对的，
+问题只在于**标志不被读取**（`isFast` 死参数）→ 慢命令仍会同步执行、冻住界面。
+此前列的「6 条分级存疑」里，除 `SCAN_PATTERN` 外均属误判。
 
 #### 修复路径（二选一，**不是改个标志位就完事**）
 

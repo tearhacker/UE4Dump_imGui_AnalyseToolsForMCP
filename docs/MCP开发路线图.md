@@ -89,7 +89,7 @@
 | 批 | 范围 | 关键动作 | 依赖 |
 |---|---|---|---|
 | 3.1 原语层 | D 组 7 工具 + L0/L1/L3 封装 | 直接包装现有 `KittyMemoryMgr`/`UEMemory`/`UEWrappers`（✅ 已有） | Phase 1 |
-| 3.2 外迁 | C 组 11 工具 + L2 参数化 | 移出匿名 namespace；`GetNamesPtr`/`GetGUObjectArrayPtr` 参数化 + 修单向扫描 bug；`findSymbol` 接线（符号优先） | Phase 2 |
+| 3.2 外迁 | C 组 11 工具 + L2 参数化 | 移出匿名 namespace；`GetNamesPtr` 参数化；`GetGUObjectArrayPtr` 双向扫描已修（✅）；`findSymbol` 接线（符号优先） | Phase 2 |
 | 3.3 接线 | F 组 5 工具 | `KittyTraceMgr` 接线 + `callRemoteFunctionBatch` 原子化 + attach 四重兜底 + 取消点 | Phase 1 |
 | 3.4 新建 | G 组 SDKQuery + H 组编排 + I 组复合 | 另起无头 SDKQuery（复用 `UEWrappers`）；`locateEngineGlobals`/`dumpSDK`/`analyzeClass` | Phase 2/3.1 |
 

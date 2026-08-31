@@ -182,17 +182,22 @@ uintptr_t weakPool = 0, weakGNames = 0;   // :1095-1096
 
 ---
 
-## 5. `GetGUObjectArrayPtr()`（`cpp:983-1059`）—— ⚠️ 已知单向扫描 bug
+## 5. `GetGUObjectArrayPtr()`（`cpp:987`）
 
 **签名**：`virtual uintptr_t GetGUObjectArrayPtr() const`（hpp `:55`）
 
-**算法**：以 `namesScanBase`（= NamesPtr，PUBG 额外 `+0x110` 解引用）为起点：
+**算法**：以 `namesScanBase`（= NamesPtr，PUBG 额外 `+0x110` 解引用）为起点，**双向扫描**最多 `0x300000` 个 8 字节偏移：
 
 ```cpp
+// 双向扫描：i=0 只扫高地址方向（避免重复），i>0 额外扫低地址方向
 for (int i = 0; i < 0x300000; ++i) {
-    candObjAddr = namesScanBase + 8ULL * i;   // ← 只加，只往高地址扫
+    // 高地址方向
+    candObjAddr = namesScanBase + 8ULL * i;
     ...
-    // 读 objects，校验 firstObj 可读，遍历 kNameOffs 找 "/Script/CoreUObject"
+    // 低地址方向（i > 0 时）
+    candObjAddr = namesScanBase - 8ULL * i;
+    if (candObjAddr < 0x10000) continue;
+    ...
 }
 ```
 
@@ -200,7 +205,7 @@ for (int i = 0; i < 0x300000; ++i) {
 - 命中 `/Script/CoreUObject` 时，若 `no != namePrivateOff` 会**自动修正 `off->UObject.NamePrivate`**（`:1044-1049`）——又一个副作用
 - **全部失败**：`LOGE("[Bootstrap] 通用方式搜索 GUObject 失败")` 返回 0（`:1057-1058`）
 
-⚠️ **bug（已在《设备端API清单》记录）**：`candObjAddr = namesScanBase + 8*i` **只往高地址单向扫**。若 GUObjectArray 实际位于 FNamePool **低地址方向**，则永远扫不到，必然返回 0。这是真机 `ERROR_INIT_GUOBJECTARRAY` 的直接根因之一。**MCP 的 `scanObjects` 参数化改造必须修掉这个（加 `direction` 参数，对应 `scanObjects.direction: UP/DOWN/BOTH`）。**
+⚠️ **原 bug 已修复**（双向扫描）。之前 `candObjAddr = namesScanBase + 8*i` 只往高地址扫，低地址方向永远扫不到——这是真机 `ERROR_INIT_GUOBJECTARRAY` 的直接根因之一。
 
 ---
 
@@ -256,17 +261,19 @@ return GetNameEntryString(GetNameEntry(id));
 
 ## 8. 其余定位接口
 
-### `isEmulator()`（`:911-922`）—— ⚠️ 已知 bug
+### `isEmulator()`（`:911`）
 
 ```cpp
 if (!getMapsContain(pid,"/arm/nb/").empty() || !getMapsContain(pid,"/arm64/nb/").empty())
     return true;
-for (auto &it : GetUnrealELF().segments())
+auto ue_elf = GetUnrealELF();
+if (!ue_elf.isValid()) return false; // 原代码 fallthrough 到 return true
+for (auto &it : ue_elf.segments())
     if (it.executable) return false;
-return true;   // ← segments 为空时落到这里
+return true;
 ```
 
-⚠️ **bug**：`GetUnrealELF().segments()` 为空时**直接返回 true（判定为模拟器）**。真机若 ELF 段解析失败会被误判成模拟器。MCP 的 `selectProcess.isEmulator` 输出不可全信。
+✅ **原 bug 已修复**：segments 为空（`GetUnrealELF()` 未找到 ELF）时不再 fallthrough 到 `return true`，而是保守返回 `false`（非模拟器）。
 
 ### `GetStaticFindObject()`（`:1241-1257`）
 
@@ -348,8 +355,8 @@ DeltaForce 专属 GNames 定位，包含**完整的 FName 解密**：
 
 | # | 陷阱 | 后果 | 应对 |
 |---|---|---|---|
-| 1 | `GetGUObjectArrayPtr` 只往高地址单向扫 | 低地址方向永远扫不到，真机 `ERROR_INIT_GUOBJECTARRAY` | `scanObjects` 参数化必须加 `direction`，修掉此 bug |
-| 2 | `isEmulator` segments 空返回 true | 真机被误判模拟器 | 不依赖此值，用 `listProcesses` 的 maps 交叉验证 |
+| 1 | ~~`GetGUObjectArrayPtr` 只往高地址单向扫~~（**已修**） | ~~低地址方向永远扫不到~~ | ✅ 双向扫描已实现 |
+| 2 | ~~`isEmulator` segments 空返回 true~~（**已修**） | ~~真机被误判模拟器~~ | ✅ ELF 无效时返回 false |
 | 3 | `BootstrapCoreObjectArrayOffsets` 改写偏移表 | `InitUEVars` 后偏移 ≠ 预设值 | `getProbeResults` 如实报告修正后的值 |
 | 4 | `GetNameEntry` 的 static 缓存 | 跨进程污染风险 | 切进程强制重新 `InitUEVars` |
 | 5 | 本层返回 `""`，L3 返回 `"None"` | 空值语义混淆 | 两层分别显式处理 |

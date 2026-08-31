@@ -914,7 +914,11 @@ bool IGameProfile::isEmulator() const
         !KittyMemoryEx::getMapsContain(kMgr.processID(), "/arm64/nb/").empty())
         return true;
 
-    for (auto &it : GetUnrealELF().segments())
+    auto ue_elf = GetUnrealELF();
+    if (!ue_elf.isValid())
+        return false; // ELF 未找到，无法判断，保守返回非模拟器
+
+    for (auto &it : ue_elf.segments())
         if (it.executable)
             return false;
 
@@ -1007,50 +1011,93 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
 
     static const uintptr_t kNameOffs[] = {0x18, 0x1c, 0x20, 0x24, 0x28,0x2c,0x30,0x34,0x38,0x3c,0x40,0x44,0x48,0x4c,0x50,0x54,0x58,0x5c,0x60,0x64,0x68,0x6c};
 
-    for (int i = 0; i < 0x300000; ++i)
+    // 双向扫描：GUObjectArray 可能在 namesScanBase 高地址或低地址方向，
+    // 原实现只往高地址扫（namesScanBase + 8*i），低地址方向永远扫不到。
+    static const int kMaxSearchDist = 0x300000;
+    for (int i = 0; i < kMaxSearchDist; ++i)
     {
-        const uintptr_t candObjAddr = namesScanBase + 8ULL * static_cast<uintptr_t>(i);
-
-        uintptr_t objects = vm_rpm_ptr<uintptr_t>((void *)(candObjAddr + objObjectsOff));
-        if (objects < 0x10000 || !kPtrValidator.isPtrReadable(objects))
-            continue;
-
-        uintptr_t firstObj = 0;
-        if (numChunks > 0)
+        // 高地址方向
         {
-            const uintptr_t chunk0 = vm_rpm_ptr<uintptr_t>((void *)objects);
-            if (!kPtrValidator.isPtrReadable(chunk0))
-                continue;
-            firstObj = vm_rpm_ptr<uintptr_t>((void *)(chunk0 + itemObj));
-        }
-        else
-        {
-            firstObj = vm_rpm_ptr<uintptr_t>((void *)(objects + itemObj));
-        }
-
-        if (firstObj < 0x10000 || !kPtrValidator.isPtrReadable(firstObj))
-            continue;
-
-        for (uintptr_t no : kNameOffs)
-        {
-            const int32_t id = vm_rpm_ptr<int32_t>((const void *)(firstObj + no));
-            if (id <= 0 || id > 0x200000)
-                continue;
-
-            const std::string nm = GetNameByID(id);
-            if (nm != "/Script/CoreUObject")
-                continue;
-
-            if (no != namePrivateOff)
+            const uintptr_t candObjAddr = namesScanBase + 8ULL * static_cast<uintptr_t>(i);
+            uintptr_t objects = vm_rpm_ptr<uintptr_t>((void *)(candObjAddr + objObjectsOff));
+            if (objects >= 0x10000 && kPtrValidator.isPtrReadable(objects))
             {
-                LOGI("[Bootstrap] Adjusting UObject.NamePrivate 0x%lx -> 0x%lx",
-                     (unsigned long)namePrivateOff, (unsigned long)no);
-                off->UObject.NamePrivate = no;
+                uintptr_t firstObj = 0;
+                if (numChunks > 0)
+                {
+                    const uintptr_t chunk0 = vm_rpm_ptr<uintptr_t>((void *)objects);
+                    if (kPtrValidator.isPtrReadable(chunk0))
+                        firstObj = vm_rpm_ptr<uintptr_t>((void *)(chunk0 + itemObj));
+                }
+                else
+                {
+                    firstObj = vm_rpm_ptr<uintptr_t>((void *)(objects + itemObj));
+                }
+                if (firstObj >= 0x10000 && kPtrValidator.isPtrReadable(firstObj))
+                {
+                    for (uintptr_t no : kNameOffs)
+                    {
+                        const int32_t id = vm_rpm_ptr<int32_t>((const void *)(firstObj + no));
+                        if (id <= 0 || id > 0x200000)
+                            continue;
+                        const std::string nm = GetNameByID(id);
+                        if (nm != "/Script/CoreUObject")
+                            continue;
+                        if (no != namePrivateOff)
+                        {
+                            LOGI("[Bootstrap] Adjusting UObject.NamePrivate 0x%lx -> 0x%lx",
+                                 (unsigned long)namePrivateOff, (unsigned long)no);
+                            off->UObject.NamePrivate = no;
+                        }
+                        LOGI("[Bootstrap] GUObject @ 0x%lx (UP/Objects=0x%lx, FirstObj=0x%lx, anchor='/Script/CoreUObject')",
+                             (unsigned long)candObjAddr, (unsigned long)objects, (unsigned long)firstObj);
+                        return candObjAddr;
+                    }
+                }
             }
-
-            LOGI("[Bootstrap] GUObject @ 0x%lx (Objects=0x%lx, FirstObj=0x%lx, anchor='/Script/CoreUObject')",
-                 (unsigned long)candObjAddr, (unsigned long)objects, (unsigned long)firstObj);
-            return candObjAddr;
+        }
+        // 低地址方向（跳过 i==0 避免重复）
+        if (i > 0)
+        {
+            const uintptr_t candObjAddr = namesScanBase - 8ULL * static_cast<uintptr_t>(i);
+            if (candObjAddr < 0x10000)
+                continue;
+            uintptr_t objects = vm_rpm_ptr<uintptr_t>((void *)(candObjAddr + objObjectsOff));
+            if (objects >= 0x10000 && kPtrValidator.isPtrReadable(objects))
+            {
+                uintptr_t firstObj = 0;
+                if (numChunks > 0)
+                {
+                    const uintptr_t chunk0 = vm_rpm_ptr<uintptr_t>((void *)objects);
+                    if (kPtrValidator.isPtrReadable(chunk0))
+                        firstObj = vm_rpm_ptr<uintptr_t>((void *)(chunk0 + itemObj));
+                }
+                else
+                {
+                    firstObj = vm_rpm_ptr<uintptr_t>((void *)(objects + itemObj));
+                }
+                if (firstObj >= 0x10000 && kPtrValidator.isPtrReadable(firstObj))
+                {
+                    for (uintptr_t no : kNameOffs)
+                    {
+                        const int32_t id = vm_rpm_ptr<int32_t>((const void *)(firstObj + no));
+                        if (id <= 0 || id > 0x200000)
+                            continue;
+                        const std::string nm = GetNameByID(id);
+                        if (nm != "/Script/CoreUObject")
+                            continue;
+                        if (no != namePrivateOff)
+                        {
+                            LOGI("[Bootstrap] Adjusting UObject.NamePrivate 0x%lx -> 0x%lx",
+                                 (unsigned long)namePrivateOff, (unsigned long)no);
+                            off->UObject.NamePrivate = no;
+                        }
+                        LOGI("[Bootstrap] GUObject @ 0x%lx (DOWN/Objects=0x%lx, FirstObj=0x%lx, anchor='/Script/CoreUObject')",
+                             (unsigned long)candObjAddr, (unsigned long)objects, (unsigned long)firstObj);
+                        return candObjAddr;
+                    }
+                }
+            }
         }
     }
 

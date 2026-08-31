@@ -26,8 +26,10 @@ constexpr size_t kMaxFrameSize = 1024 * 1024;  // 单帧 1MB 上限
 constexpr size_t kRecvChunkSize = 8192;
 
 // ---------------------------------------------------------------- 内部循环节奏
-constexpr int kSelectTimeoutMs = 100;      // select 超时，兼顾心跳与响应检查
+constexpr int kSelectTimeoutMs = 100;      // select 超时,兼顾心跳与响应检查
 constexpr int kPollSleepMs = 20;           // 等待响应时的轮询间隔
+// 会话超时(同步到 PtraceSessionRegistry)
+inline const int kSessionIdleTimeoutMs = 30000;
 
 // ---------------------------------------------------------------- 错误码（协议 §5）
 namespace Err

@@ -44,6 +44,9 @@ public:
     static void BindQueue(CommandQueue *queue);
     static CommandQueue &Queue();
 
+    // 🔴 强制清空队列(新连接建立时调用,清除上一连接遗留的未消费响应)
+    static void Clear();
+
 private:
     static std::mutex registryMtx_;
     static std::unordered_map<std::string, CommandHandler> handlers_;

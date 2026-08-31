@@ -1121,8 +1121,21 @@ namespace
     //
     // ⚠️ isFast 目前是【死参数】：Register() 把它存进 CommandDispatcher::fastFlags_，
     //    但 PollOnce() 从不读取——所有命令一律当场同步执行，跟 isFast 取什么值无关。
-    //    所以耗时命令（SCAN_GNAMES / SCAN_OBJECTS 是分钟级）会同步占满主线程：
-    //      渲染循环停 → PollOnce() 停 → 心跳发不出去 → PC 侧 10s 判超时，表现为"设备端假死"。
+    //
+    //    【后果是什么】耗时命令会同步占满主线程 → ImGui 渲染循环停 → **界面卡住**。
+    //    但 🔴 心跳不会停：心跳由 CommandServer 线程在 HandleFrame 的等待循环里发
+    //    （CommandServer.cpp:255），跟主线程忙不忙无关。所以 PC 侧**不会**误判假死，
+    //    只是设备端界面冻住，且命令若超过 kCommandTimeoutSec(120s) 会被掐断返 E_TIMEOUT。
+    //
+    //    【哪些命令真慢】不要照协议文档 §6/§7 的字面描述判断，要看实现：
+    //      · SCAN_PATTERN  扫最多 512MB → 真慢（已标 false）
+    //      · SEARCH_CLASSES 遍历整个 GUObjectArray → 真慢（已标 false）
+    //      · SCAN_CANDIDATES 按 maps 扫区域 → 真慢
+    //      · LOCATE_ENGINE_GLOBALS 多步编排 → 真慢（已标 false）
+    //    而 SCAN_GNAMES / SCAN_OBJECTS **并不慢**：它们复用 START_PROBE 已解析出的
+    //    指针，只采样 16 条做自校验，是毫秒级。协议文档说它们"分钟级"是按
+    //    "从零全网扫描"的语义写的，与当前实现不符 —— 标 true 是对的。
+    //
     //    isFast 的【预期】语义保留为：true=同步执行；false=应投递 gWorkerThread。
     //    要让它真正生效，需在 PollOnce() 里按 fastFlags_ 路由（见 docs/api/12 §5.3.1）。
     //    在此之前，改这个标志位没有任何运行时效果，别误以为改了就修好了。

@@ -35,14 +35,31 @@ namespace
 {
 std::string GenerateToken()
 {
-    // 一次性随机 token（8 位十六进制）
-    // 随机源只用高精度时钟：本函数在匿名 namespace，无权访问 CommandServer 的私有静态成员
+    // 🔴 安全:使用 /dev/urandom 获取加密级随机字节(比 std::rand 安全得多)
+    // Android/Linux 环境保证 /dev/urandom 存在
+    FILE *f = fopen("/dev/urandom", "rb");
+    if (f)
+    {
+        unsigned char buf[8];
+        size_t n = fread(buf, 1, sizeof(buf), f);
+        fclose(f);
+        if (n == sizeof(buf))
+        {
+            char out[17];
+            std::snprintf(out, sizeof(out), "%02x%02x%02x%02x%02x%02x%02x%02x",
+                          buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);
+            return std::string(out);
+        }
+    }
+    // 回退:高精度时钟 + 进程ID(避免污染全局 rand)
     const uint64_t seed = static_cast<uint64_t>(
-        std::chrono::high_resolution_clock::now().time_since_epoch().count());
-    std::srand(static_cast<unsigned>(seed) ^ static_cast<unsigned>(seed >> 32));
-    char buf[16];
-    std::snprintf(buf, sizeof(buf), "%04x%04x", std::rand() & 0xFFFF, std::rand() & 0xFFFF);
-    return std::string(buf);
+        std::chrono::high_resolution_clock::now().time_since_epoch().count())
+                          ^ static_cast<uint64_t>(getpid());
+    char out[17];
+    std::snprintf(out, sizeof(out), "%08llx%08llx",
+                  (unsigned long long)(seed & 0xFFFFFFFFULL),
+                  (unsigned long long)((seed >> 32) & 0xFFFFFFFFULL));
+    return std::string(out);
 }
 }  // namespace
 
@@ -139,6 +156,10 @@ bool CommandServer::HandleFrame(int sock, const std::string &line, bool &authent
     {
         json err;
         err["ok"] = false;
+        // 🔴 含 id 字段:PC 侧工具调用栈才能正确关联错误与请求
+        const auto idIt = req.find("id");
+        if (idIt != req.end())
+            err["id"] = *idIt;
         err["error"] = {{"code", Err::kBadJson}, {"msg", "JSON 解析失败"}};
         return SendFrame(sock, err.dump());
     }
@@ -147,6 +168,9 @@ bool CommandServer::HandleFrame(int sock, const std::string &line, bool &authent
     {
         json err;
         err["ok"] = false;
+        const auto idIt = req.find("id");
+        if (idIt != req.end())
+            err["id"] = *idIt;
         err["error"] = {{"code", Err::kBadJson}, {"msg", "帧不是 JSON 对象"}};
         return SendFrame(sock, err.dump());
     }
@@ -207,7 +231,7 @@ bool CommandServer::HandleFrame(int sock, const std::string &line, bool &authent
         return SendFrame(sock, ok.dump());
     }
 
-    // 普通请求：需要 id + cmd
+    // 普通请求:需要 id + cmd
     if (!req.contains("id") || !req.contains("cmd"))
     {
         json err;
@@ -228,15 +252,16 @@ bool CommandServer::HandleFrame(int sock, const std::string &line, bool &authent
         return SendFrame(sock, err.dump());
     }
 
-    // 入队，交给主线程执行
+    // 入队,交给主线程执行
     json args = req.contains("args") && req["args"].is_object() ? req["args"] : json::object();
     queue_->PushRequest({id, cmd, args.dump()});
 
-    // 同步等待响应（期间持续发心跳，让 PC 侧区分「在算」与「死了」）
+    // 同步等待响应(期间持续发心跳,让 PC 侧区分「在算」与「死了」)
     time_t lastHeartbeat = std::time(nullptr);
     const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(kCommandTimeoutSec);
 
-    // 接入 stopRequested_：关机/Stop() 时可即时中断等待，避免线程无法回收
+    // 🔴 孤儿响应检测:命令在超时后完成时会入队,本循环必须跳过 id 不匹配的响应
+    // 否则下一条连接会收到上一条超时命令的响应(协议 §3.9)
     while (std::chrono::steady_clock::now() < deadline && !stopRequested_.load())
     {
         CommandResponse resp;
@@ -244,8 +269,8 @@ bool CommandServer::HandleFrame(int sock, const std::string &line, bool &authent
         {
             if (resp.id != id)
             {
-                // 串行协议下不应出现；兜底丢弃错配响应
-                LOGE("[MCP] 响应 id 错配（期望 %llu，实得 %llu）",
+                // 串行协议下不应出现;兜底丢弃错配响应
+                LOGE("[MCP] 响应 id 错配(期望 %llu,实得 %llu)",
                      (unsigned long long)id, (unsigned long long)resp.id);
                 continue;
             }
@@ -256,8 +281,8 @@ bool CommandServer::HandleFrame(int sock, const std::string &line, bool &authent
         std::this_thread::sleep_for(std::chrono::milliseconds(kPollSleepMs));
     }
 
-    // 硬超时（协议 §3.9）
-    LOGE("[MCP] 命令 %s 执行超时（%ds）", cmd.c_str(), kCommandTimeoutSec);
+    // 硬超时(协议 §3.9)
+    LOGE("[MCP] 命令 %s 执行超时(%ds),后续可能有无主响应入队", cmd.c_str(), kCommandTimeoutSec);
     json err;
     err["id"] = id;
     err["ok"] = false;
@@ -327,7 +352,8 @@ void CommandServer::ServerLoop()
             continue;
 
         LOGI("[MCP] 客户端已连接");
-        queue_->Clear();
+        // 🔴 新连接:清空队列,丢弃上一连接的未消费响应(防止孤儿响应污染)
+        CommandDispatcher::Clear();
 
         // 连接级认证状态：每个新连接都必须重新 auth
         bool authenticated = false;
@@ -379,7 +405,16 @@ void CommandServer::ServerLoop()
 
             recvBuf.append(chunk.data(), static_cast<size_t>(got));
 
-            // 处理所有完整行（NDJSON）
+            // 🔴 recvBuf 上限：防止客户端不发 \n 导致无限增长 OOM
+            if (recvBuf.size() > kMaxFrameSize * 16)
+            {
+                LOGE("[MCP] recvBuf 累积 %zu 字节超过阈值(%zu),断开",
+                     recvBuf.size(), kMaxFrameSize * 16);
+                connected = false;
+                break;
+            }
+
+            // 处理所有完整行(NDJSON)
             size_t pos;
             while ((pos = recvBuf.find(kFrameDelimiter)) != std::string::npos)
             {

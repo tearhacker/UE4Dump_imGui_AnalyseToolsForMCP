@@ -1,5 +1,6 @@
 #include "CommandDispatcher.hpp"
 
+#include <algorithm>
 #include <chrono>
 #include <utility>
 
@@ -22,6 +23,14 @@ CommandQueue &CommandDispatcher::Queue()
     return *queue_;
 }
 
+// 🔴 强制清空队列(安全点:调用方需保证当前无命令在执行中)
+// 用途:新连接建立时清除上一连接遗留的未消费响应,防止孤儿响应污染新会话
+void CommandDispatcher::Clear()
+{
+    if (queue_)
+        queue_->Clear();
+}
+
 void CommandDispatcher::Register(const std::string &cmd, CommandHandler handler, bool isFast)
 {
     std::lock_guard<std::mutex> lock(registryMtx_);
@@ -42,6 +51,8 @@ std::vector<std::string> CommandDispatcher::RegisteredCommands()
     out.reserve(handlers_.size());
     for (const auto &kv : handlers_)
         out.push_back(kv.first);
+    // 🔴 排序:确保持久化/序列化顺序稳定,避免非确定性 JSON 输出
+    std::sort(out.begin(), out.end());
     return out;
 }
 

@@ -94,12 +94,12 @@ L0 会话层       进程枚举、目标选择、探针复用失效
 | 取引擎变量 | `const UEVars *GetUEVars()` | 拿到全部定位结果 | ✅ |
 | 取 UE ELF | `ElfScanner GetUnrealELF()` | 三级查找：maps → apk 内 zip（split config）→ linker solist | ✅ |
 | 名字表定位 | `uintptr_t GetNamesPtr()` | 多锚点扫描 GNames / FNamePool | ✅（硬编码参数待参数化） |
-| 对象数组定位 | `uintptr_t GetGUObjectArrayPtr()` | 扫描 GUObjectArray | ⚠️ **只往高地址单向扫**，需修 |
+| 对象数组定位 | `uintptr_t GetGUObjectArrayPtr()` | 扫描 GUObjectArray | ✅ **双向扫描已修**（原只往高地址单向扫，现已同时扫描低地址方向） |
 | 名字条目 | `uint8_t *GetNameEntry(int32_t id)` | 按 id 取 FNameEntry 地址 | ✅ |
 | 名字字符串 | `std::string GetNameEntryString(uint8_t *entry)` | 解出名字（可被覆写做解密） | ✅ |
 | 按 id 取名 | `std::string GetNameByID(int32_t id)` | 组合上面两步 | ✅ |
 | pattern 查找 | `uintptr_t findIdaPattern(PATTERN_MAP_TYPE, const std::string &pattern, int step, uint32_t skip_result = 0)` | IDA 风 pattern 搜索 | ✅ |
-| 模拟器判定 | `bool isEmulator()` | 判断目标是否在模拟器 | ⚠️ **有 bug**：`segments()` 为空时直接 return true |
+| 模拟器判定 | `bool isEmulator()` | 判断目标是否在模拟器 | ✅ **已修**：segments() 为空时返回 false（原直接 return true，真机误判模拟器） |
 
 **纯虚（各 profile 必须实现）**：`ArchSupprted` / `GetAppName` / `GetAppIDs` / `isUsingCasePreservingName` / `IsUsingFNamePool` / `isUsingOutlineNumberName` / `GetOffsets`
 **UMT 独有纯虚**（上游没有）：`GetMatrix` / `GetPhysx` / `GetFrameCount`
@@ -452,7 +452,7 @@ void UEDumper::Dump(std::unordered_map<std::string, BufferFmt> *outBuffersMap);
 |---|---|
 | socket 命令服务 | `src/` 下 `AF_INET`/`bind`/`listen`/`accept` **零命中**；`main()` 在 `:1805-1813` 直接进 Vulkan 渲染阻塞循环 |
 | 任务取消 | `cancelRequested` / `atomic<bool>` 在 `src/` 非 imgui 部分 **零命中** |
-| 参数化扫描 | `GetNamesPtr()` / `GetGUObjectArrayPtr()` 均无参，范围/偏移/区域全硬编码 |
+| 参数化扫描 | `GetNamesPtr()` 无参，范围/偏移全硬编码（**`GetGUObjectArrayPtr` 扫描方向 bug 已修，但签名仍无参**） |
 | 批量采样 | 采样点写死 `for (int i = 0; i < 5; i++)`（`Dumper.cpp:248` / `:267`） |
 | 偏移编辑 UI | 不存在 |
 | profile 管理 UI | 不存在 |
@@ -468,7 +468,7 @@ void UEDumper::Dump(std::unordered_map<std::string, BufferFmt> *outBuffersMap);
 ```
 L0 会话层     外迁 FindAutoProcessCandidates / InvalidateProbeReuse     ~30 行
 L1 原语层     大部分已有，只需封装；findSymbol 需接线                    ~150 行
-L2 配置层     参数化 GetNamesPtr / GetGUObjectArrayPtr（含修单向扫描）   ~120 行
+L2 配置层     参数化 GetNamesPtr（`GetGUObjectArrayPtr` 双向扫描已修，仅保留无参现状） ~60 行
 L3 对象层     现有 API 直接包装成命令                                   ~200 行
 L4 分析层     AutoFix 五个子能力直接包装（现成的，最划算）               ~200 行
 L5 批处理层   外迁 3 个 Execute + 换掉 gProbeResult 全局                 ~250 行

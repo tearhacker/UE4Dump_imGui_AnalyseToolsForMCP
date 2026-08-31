@@ -25,12 +25,16 @@ PtraceSessionRegistry::~PtraceSessionRegistry()
 
 void PtraceSessionRegistry::ForceDetachAll()
 {
-    std::lock_guard<std::mutex> lk(mu_);
-    if (attached_ && UEMemory::kMgr.isMemValid())
-        UEMemory::kMgr.trace.Detach();
-    attached_ = false;
-    activeId_.clear();
-    maxHoldMs_ = 0;
+    bool shouldDetach = false;
+    {
+        std::lock_guard<std::mutex> lk(mu_);
+        shouldDetach = attached_ && UEMemory::kMgr.isMemValid();
+        attached_ = false;
+        activeId_.clear();
+        maxHoldMs_ = 0;
+    }
+    if (shouldDetach)
+        UEMemory::kMgr.trace.Detach();  // 锁外执行,避免阻塞 Touch/IsActive
 }
 
 std::string PtraceSessionRegistry::Begin(int maxHoldMs)
@@ -66,12 +70,13 @@ int64_t PtraceSessionRegistry::End(const std::string &sessionId)
                              std::chrono::steady_clock::now() - createdAt_)
                              .count();
 
-    if (UEMemory::kMgr.isMemValid())
-        UEMemory::kMgr.trace.Detach();
-
+    bool shouldDetach = UEMemory::kMgr.isMemValid();
     attached_ = false;
     activeId_.clear();
     maxHoldMs_ = 0;
+    if (shouldDetach)
+        UEMemory::kMgr.trace.Detach();  // 锁外执行,避免阻塞心跳
+
     return static_cast<int64_t>(elapsed);
 }
 
@@ -138,24 +143,28 @@ void PtraceSessionRegistry::WatchdogLoop()
     {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
 
-        std::lock_guard<std::mutex> lk(mu_);
-        if (!attached_)
-            continue;
-
-        const auto now = std::chrono::steady_clock::now();
-        const auto heldMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - createdAt_).count();
-        const auto idleMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUsedAt_).count();
-
-        // 兜底 1：maxHoldMs 到点强制 detach
-        // 兜底 2：空闲超时强制 detach
-        if ((maxHoldMs_ > 0 && heldMs > maxHoldMs_) || idleMs > kSessionIdleTimeoutMs)
+        bool shouldDetach = false;
         {
-            if (UEMemory::kMgr.isMemValid())
-                UEMemory::kMgr.trace.Detach();
-            attached_ = false;
-            activeId_.clear();
-            maxHoldMs_ = 0;
+            std::lock_guard<std::mutex> lk(mu_);
+            if (!attached_)
+                continue;
+
+            const auto now = std::chrono::steady_clock::now();
+            const auto heldMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - createdAt_).count();
+            const auto idleMs = std::chrono::duration_cast<std::chrono::milliseconds>(now - lastUsedAt_).count();
+
+            // 兜底 1:maxHoldMs 到点强制 detach
+            // 兜底 2:空闲超时强制 detach
+            if ((maxHoldMs_ > 0 && heldMs > maxHoldMs_) || idleMs > kSessionIdleTimeoutMs)
+            {
+                shouldDetach = UEMemory::kMgr.isMemValid();
+                attached_ = false;
+                activeId_.clear();
+                maxHoldMs_ = 0;
+            }
         }
+        if (shouldDetach)
+            UEMemory::kMgr.trace.Detach();  // 锁外执行,避免阻塞 mu_
     }
 }
 
