@@ -185,7 +185,9 @@ private:
 
 ## 4. 构建流程
 
-### 4.1 WSL2编译（一次性）
+### 4.1 WSL2编译（一次性，原方案说明）
+
+> 注意：`ghidra-native` 源码目录本身没有可直接使用的顶层 CMakeLists；下面的 CMake 段落是历史设计稿。当前实际构建应按 **4.3 踩坑记录** 使用 `src/decompiler/Makefile`，并显式补齐 `sleigh_arch`、`inject_sleigh`、`libdecomp`、`raw_arch`。
 
 ```bash
 # 进入WSL2
@@ -245,6 +247,79 @@ cp /tmp/ghidra-build/build/src/decompiler/libdecomp.a \
 ```
 
 ---
+
+## 4.3 实际踩坑记录（WSL2 + NDK r27）
+
+本节记录本项目实际遇到的问题，后续重新构建时按此顺序检查。
+
+### 4.3.1 `libdecomp.hh` 找不到
+
+Ghidra 头文件不在 `third_party/ghidra_decomp/` 根目录，而在其 `include/` 子目录。仅添加上层目录会在编译 `GhidraDecompiler.cpp` 时失败：
+
+```text
+fatal error: 'libdecomp.hh' file not found
+```
+
+CMake 必须包含：
+
+```cmake
+include_directories(third_party/ghidra_decomp
+                    third_party/ghidra_decomp/include
+                    include)
+```
+
+### 4.3.2 预编译 `libdecomp.a` 并不完整
+
+原先的静态库虽然约 8 MB，但只包含核心对象，缺少以下实现：
+
+- `libdecomp.cc`：`startDecompilerLibrary()` / `shutdownDecompilerLibrary()`
+- `raw_arch.cc`：`RawBinaryArchitecture`
+- `sleigh_arch.cc`：`SleighArchitecture`
+- `inject_sleigh.cc`：`PcodeInjectLibrarySleigh`
+
+因此会出现大量 `undefined symbol`。不能只补链接顺序，必须从完整源码重新归档。
+
+### 4.3.3 Makefile 默认会带入 `bfd` 依赖
+
+`LIBDECOMP_NAMES` 通过 `EXTRA` 自动包含 `analyzesigs`、`bfd_arch`，Android sysroot 没有 `bfd.h`。构建时需要覆盖 `EXTRA=`，并显式加入缺失的 Ghidra 对象：
+
+```make
+LIBDECOMP_NAMES=$(CORE) $(DECCORE) $(EXTRA) $(SLEIGH) \
+  sleigh_arch inject_sleigh libdecomp raw_arch
+```
+
+### 4.3.4 WSL2 的 C++ ABI 必须与 Android 主工程一致
+
+主工程使用 NDK libc++（符号含 `std::__ndk1`）。如果直接用 WSL 的默认 libstdc++ 编译静态库，最终链接仍会失败。编译 Ghidra 库时必须使用 NDK libc++ 头文件：
+
+```bash
+NDK=/mnt/d/ProgramerDevelop/windowsNDK27
+CXX="/usr/bin/clang++ -nostdinc++ \
+  -isystem $NDK/toolchains/llvm/prebuilt/windows-x86_64/sysroot/usr/include/c++/v1"
+```
+
+### 4.3.5 Windows NDK 没有 Linux host 工具目录
+
+`windowsNDK27` 只有 `prebuilt/windows-x86_64`，WSL 中不存在 `prebuilt/linux-x86_64/clang++`。应使用 WSL 的 `/usr/bin/clang++`，但目标和 sysroot 指向 Windows NDK：
+
+```bash
+make -C src/decompiler libdecomp.a -j4 \
+  CXX="$CXX --target=aarch64-none-linux-android30 \
+  --sysroot=$NDK/toolchains/llvm/prebuilt/windows-x86_64/sysroot" \
+  AR=/usr/bin/llvm-ar RANLIB=/usr/bin/llvm-ranlib \
+  ARCH_TYPE= EXTRA= \
+  OPT_CXXFLAGS="-O2 -fPIC -std=c++11 -DANDROID -Wno-sign-compare"
+```
+
+### 4.3.6 最终验证
+
+复制生成的 `libdecomp.a` 到 `third_party/ghidra_decomp/` 后，执行：
+
+```bat
+cmd /c build_android.bat
+```
+
+必须看到 `BUILD SUCCESS`。如果 CMake 缓存曾经使用过 `UMT_GHIDRA=OFF`，批处理脚本必须显式传入 `-DUMT_GHIDRA=ON`，否则不会重新启用后端。
 
 ## 5. MCP工具设计
 
