@@ -150,7 +150,7 @@ int main() {
     setbuf 全关;
     Logger::SetSink(LoggerSink);                    // :3519
     RefreshCandidates();                            // :3520
-    {   // ---- MCP 命令服务（服务端，bind 127.0.0.1:27185）----
+    {   // ---- MCP 命令服务（服务端，bind 127.0.0.1:35515）----
         static UmtMcp::CommandQueue mcpQueue;       // :3524
         UmtMcp::CommandDispatcher::BindQueue(&mcpQueue);  // :3525
         SetupMcpCommands();                         // :3526

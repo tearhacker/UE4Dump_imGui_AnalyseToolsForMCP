@@ -8,7 +8,7 @@
 
 运行前置条件：
     1. 手机已 adb 连接，且 UMT 正在运行
-    2. 已执行端口转发：adb forward tcp:27185 tcp:27185
+    2. 已执行端口转发：adb forward tcp:35515 tcp:35515
     3. 已设置 token 环境变量：
            export UMT_TOKEN=<UMT logcat 里的一次性 token>
        token 是设备端每次启动随机生成的，重启 UMT 后必须换新的。

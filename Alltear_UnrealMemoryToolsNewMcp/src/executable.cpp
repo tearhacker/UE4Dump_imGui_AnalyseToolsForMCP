@@ -3535,7 +3535,7 @@ int main()
     Logger::SetSink(LoggerSink);
     RefreshCandidates();
 
-    // ---- MCP 命令服务（服务端，bind 127.0.0.1:27185）----
+    // ---- MCP 命令服务（服务端，bind 127.0.0.1:35515）----
     {
         static UmtMcp::CommandQueue mcpQueue;
         UmtMcp::CommandDispatcher::BindQueue(&mcpQueue);

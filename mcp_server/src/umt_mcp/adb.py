@@ -1,6 +1,6 @@
 """ADB 端口转发管理。
 
-协议 §1 规定设备端 bind 127.0.0.1:27185，仅经 adb forward 暴露给 PC。
+协议 §1 规定设备端 bind 127.0.0.1:35515，仅经 adb forward 暴露给 PC。
 本模块封装 adb forward 的前置检查和幂等执行。
 
 错误处理原则：报错时给出明确的操作指引，不静默失败。
@@ -15,7 +15,7 @@ from typing import Sequence
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_PORT = 27185
+DEFAULT_PORT = 35515
 
 # 可执行文件路径，默认走 PATH；可用 set_adb_bin() 覆盖（如 mcp.json 传入 --adb）
 _adb_bin = "adb"

@@ -108,7 +108,7 @@ class TestConstantsAlignment:
         assert config.PROTOCOL_VERSION == 1
 
     def test_default_port(self) -> None:
-        assert config.DEFAULT_PORT == 27185
+        assert config.DEFAULT_PORT == 35515
 
     def test_heartbeat_timeout(self) -> None:
         assert config.HEARTBEAT_TIMEOUT == 10.0

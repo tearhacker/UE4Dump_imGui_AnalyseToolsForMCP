@@ -3,7 +3,7 @@
 > 本文档**只描述 MCP 服务对外提供什么功能**。
 > 设计论证、实施路线、验收标准、代码位置索引见《功能说明》与《开发必读架构》。
 >
-> 服务名：`unreal-memory-tools`　协议：MCP over stdio　设备端端口：27185
+> 服务名：`unreal-memory-tools`　协议：MCP over stdio　设备端端口：35515
 > **43 个工具**，按 A–I 九个模块划分。工具名 camelCase，原生命令名大写下划线。
 （ATTACH + DISASSEMBLE 为协议 §6 追加，超出原始 42 工具规格）
 

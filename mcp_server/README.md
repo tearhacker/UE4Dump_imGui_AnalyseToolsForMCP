@@ -5,7 +5,7 @@ PC 侧 MCP 服务端：把 Android/C++ 设备端（UMT，Unreal Memory Tools）�
 ptrace 远程调用。
 
 - 基于官方 Python MCP SDK（`mcp` 包，FastMCP），stdio 传输
-- 设备通信：TCP + NDJSON，`adb forward tcp:27185 tcp:27185` 隧道
+- 设备通信：TCP + NDJSON，`adb forward tcp:35515 tcp:35515` 隧道
 - 协议：HELLO → AUTH（一次性 token）→ 心跳 → 严格串行一问一答
 - 工具名对外为 **camelCase**（如 `readMemory`），设备端命令为 **UPPER_SNAKE**
   （如 `MEMORY_READ`），由 `tools.py` 自动映射，启动时 `self_check()` 校验
@@ -20,14 +20,14 @@ server.py               FastMCP 挂载 43 个工具 + 4 个资源 + instructions
 src/umt_mcp/tools.py    工具 → 设备端命令名/参数键映射 + self_check()
 src/umt_mcp/bridge.py   socket 桥接：连接 / 握手 / 分帧 / 心跳判活 / 重连 / 串行化
 src/umt_mcp/protocol.py 帧常量、错误码、协议层/执行层错误分层
-   ▼  TCP + NDJSON（127.0.0.1:27185）
+   ▼  TCP + NDJSON（127.0.0.1:35515）
 设备端 CommandServer (C++, 只监听回环) → 43 条命令 → UMT 引擎语义层
 ```
 
 ## 前置条件
 
 1. 手机 adb 连接：`adb devices`
-2. 端口转发（设备端只监听回环）：`adb forward tcp:27185 tcp:27185`
+2. 端口转发（设备端只监听回环）：`adb forward tcp:35515 tcp:35515`
 3. 取设备端一次性 token（UMT logcat 输出，每次启动随机生成）：
    ```bash
    export UMT_TOKEN=<logcat 中的 token>

@@ -7,7 +7,7 @@
 - 文档版本：1.0（2026-08-31）
 - 协议版本：1（`config.PROTOCOL_VERSION`）
 - 服务端：Python `FastMCP`（stdio），工具名对外为 **camelCase**
-- 设备端：Android/C++ 命令服务，`127.0.0.1:27185`，经 `adb forward` 暴露
+- 设备端：Android/C++ 命令服务，`127.0.0.1:35515`，经 `adb forward` 暴露
 
 ---
 
@@ -20,7 +20,7 @@ AI (MCP client)
 mcp_server (Python, stdio)
    │  TCP + NDJSON + HELLO/AUTH + 心跳
    ▼
-设备端 CommandServer (C++, 127.0.0.1:27185)
+设备端 CommandServer (C++, 127.0.0.1:35515)
    │  UPPER_SNAKE 命令
    ▼
 UMT 引擎语义层（GNames / GUObjectArray / SDK Dump / ptrace）
@@ -39,7 +39,7 @@ UMT 引擎语义层（GNames / GUObjectArray / SDK Dump / ptrace）
 adb devices
 
 # 2. 端口转发（设备端只监听回环）
-adb forward tcp:27185 tcp:27185
+adb forward tcp:35515 tcp:35515
 
 # 3. 取设备端一次性 token（UMT logcat 输出，设备端每次启动随机生成）
 export UMT_TOKEN=<logcat 中的 token>

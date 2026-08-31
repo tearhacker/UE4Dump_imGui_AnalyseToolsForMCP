@@ -9,7 +9,7 @@ from __future__ import annotations
 # 设备端 CommandServer 强制 bind 127.0.0.1，仅经 adb forward 暴露。
 # PC 侧绝不可连设备的局域网 IP。
 HOST = "127.0.0.1"
-DEFAULT_PORT = 27185
+DEFAULT_PORT = 35515
 
 # adb forward 隧道（PC 侧 → 设备端）
 ADB_FORWARD_SPEC = f"tcp:{DEFAULT_PORT}"

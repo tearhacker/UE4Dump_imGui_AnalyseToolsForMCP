@@ -36,7 +36,7 @@ AI 客户端
   │ stdio · 换行分隔 JSON-RPC 2.0
   ▼
 mcp_server.py（PC 侧，零第三方依赖 / 仅 capstone 可选）
-  │ adb forward tcp:27185
+  │ adb forward tcp:35515
   ▼
 命令服务线程（UMT 进程内，新增）
   │ 命令队列（mutex + condition_variable）

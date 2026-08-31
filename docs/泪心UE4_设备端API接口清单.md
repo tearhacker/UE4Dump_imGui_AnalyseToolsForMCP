@@ -450,7 +450,7 @@ void UEDumper::Dump(std::unordered_map<std::string, BufferFmt> *outBuffersMap);
 
 | 能力 | 说明 |
 |---|---|
-| ✅ socket 命令服务 | `src/mcp/CommandServer.cpp`：`bind(127.0.0.1, 27185)` + `listen(1)` + `accept`，NDJSON 分帧，Token 鉴权，心跳 2s/超时 120s |
+| ✅ socket 命令服务 | `src/mcp/CommandServer.cpp`：`bind(127.0.0.1, 35515)` + `listen(1)` + `accept`，NDJSON 分帧，Token 鉴权，心跳 2s/超时 120s |
 | ✅ 任务取消 | `executable.cpp:156` `gCancelRequested` + `CANCEL_JOB`(:2696)，ExecuteProbe/Dump 有检查点 |
 | ✅ 43 条 MCP 命令 | A~I 组全覆盖，内联注册（未外迁） |
 

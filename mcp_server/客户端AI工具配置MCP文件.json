@@ -2,6 +2,8 @@
   "command": "C:/Program Files/Python310/python.exe",
   "args": [
     "D:/泪心安卓领域基本盘技术/ue4ImGuiAutoWorkingMcpBytear/mcp_server/server.py",
+    "--port",
+    "35515",
     "--adb",
     "C:/Program Files/platform-tools/adb.exe"
   ]

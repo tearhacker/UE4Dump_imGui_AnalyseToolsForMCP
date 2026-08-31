@@ -9,7 +9,7 @@
 > **设备端（imgui 项目）才是服务端，PC 侧是客户端。** 没有设备端的 `CommandServer`
 > （`bind + listen`），PC 侧 `connect` 必然 `ECONNREFUSED` —— **链都建不起来**。
 >
-> 链路：`AI 客户端 ──stdio──> PC mcp_server（客户端）──adb forward tcp:27185──> 设备端 CommandServer（服务端）──> UMT 能力`
+> 链路：`AI 客户端 ──stdio──> PC mcp_server（客户端）──adb forward tcp:35515──> 设备端 CommandServer（服务端）──> UMT 能力`
 >
 > 因此**真实起点是两端共用的通信协议**（见 §2 Step 2），本步骤里的 PC 侧工作
 > 在设备端服务端落地之前，只能在 mock 设备端下推进。设备端侧的设计见 §4。
@@ -40,7 +40,7 @@ mcp_server/
 ├── requirements.txt            ⬜ 锁版本：mcp / capstone / pytest
 ├── src/umt_mcp/                ⬜ 包（避免 import 路径坑）
 │   ├── __init__.py
-│   ├── config.py               端口 27185、token、超时、waitMs 默认值
+│   ├── config.py               端口 35515、token、超时、waitMs 默认值
 │   ├── protocol.py             设备端 wire protocol（帧/HELLO/错误码）
 │   ├── bridge.py               socket 客户端 + 重连 + RLock 串行
 │   ├── adb.py                  adb forward 管理
@@ -83,7 +83,7 @@ mcp_server/
 - **验收**：`tests/contract/` 黄金样例可被 PC 侧与设备端测试共同引用；`test_protocol.py` 全过
 
 ### Step 3　设备桥接层 `bridge.py`
-- **产出**：socket 客户端（连 `127.0.0.1:27185`）+ HELLO+token 校验 + **指数退避重连（1/2/4…≤30s）** + `RLock` 串行化 + `asyncio.to_thread` 包装阻塞 I/O
+- **产出**：socket 客户端（连 `127.0.0.1:35515`）+ HELLO+token 校验 + **指数退避重连（1/2/4…≤30s）** + `RLock` 串行化 + `asyncio.to_thread` 包装阻塞 I/O
 - **🔴 心跳判活（防卡死必需）**：后台收心跳帧（协议 §3.8，设备端每 2s 一帧）；
   **超过 10s 无心跳判定设备端假死** → 断开重连。这让 PC 侧能区分「**在算**」（心跳正常 busy=true）与「**死了**」（无心跳）
 - **软超时**：单命令等待超过 `SOCKET_TIMEOUT`（60s）也要能中断等待并探活，不能无限阻塞
@@ -91,7 +91,7 @@ mcp_server/
   **心跳停止 10s 后能自动判定假死并重连**
 
 ### Step 4　ADB 辅助 `adb.py`
-- **产出**：`adb forward tcp:27185 tcp:27185` 的封装（前置检查、幂等、错误提示）
+- **产出**：`adb forward tcp:35515 tcp:35515` 的封装（前置检查、幂等、错误提示）
 - **验收**：无设备时给出明确错误，不静默失败
 
 ### Step 5　Server 入口 + Instructions + 资源
@@ -139,7 +139,7 @@ mcp_server/
 | 3 | **阻塞 I/O 必须 `asyncio.to_thread`** | 所有 bridge 调用，否则卡死事件循环（progress/cancel 全停） |
 | 4 | **日志一律 stderr** | stdout 是 MCP 协议通道，禁止写 |
 | 5 | **错误分层** | 协议错→JSON-RPC error；执行失败→`isError: true` |
-| 6 | **PC 连 `127.0.0.1:27185`** | 绝不连设备的局域网 IP（设备端 bind 127.0.0.1） |
+| 6 | **PC 连 `127.0.0.1:35515`** | 绝不连设备的局域网 IP（设备端 bind 127.0.0.1） |
 | 7 | **缓存命中可见** | 返回带 `cached: true` + 原始参数回显 |
 | 8 | **禁止 "not found"** | 搜索类工具返回次优候选 + 中性描述 |
 | 9 | **危险操作默认关闭** | `writeMemory`/`callRemoteFunction` 需 `confirmDangerous: true` |
@@ -155,8 +155,8 @@ mcp_server/
 
 | 端 | 角色 | socket 动作 |
 |---|---|---|
-| 设备端 UMT | **服务端** | `bind("127.0.0.1",27185)` → `listen` → `accept` |
-| PC mcp_server | **客户端** | `connect("127.0.0.1:27185)` |
+| 设备端 UMT | **服务端** | `bind("127.0.0.1",35515)` → `listen` → `accept` |
+| PC mcp_server | **客户端** | `connect("127.0.0.1:35515)` |
 
 **源码现状**：`src/mcp/CommandServer.cpp` 已完整实现（`bind/listen/accept`），PC 侧 `connect` 可打通。
 `main()`（`:1761`）初始化完 Vulkan 后进 `while(flag)` 渲染循环，同时 `CommandServer` 在独立线程运行。

@@ -23,7 +23,7 @@ INSTRUCTIONS = r"""\
   (root进程)       adb forward    (Python MCP)          (你)
 ```
 
-- 设备端 bind `127.0.0.1:27185`，仅经 `adb forward tcp:27185 tcp:27185` 暴露
+- 设备端 bind `127.0.0.1:35515`，仅经 `adb forward tcp:35515 tcp:35515` 暴露
 - 严格串行，一问一答；PC 侧自动排队
 - 心跳每 2 秒一帧；10 秒无心跳判假死并自动重连
 

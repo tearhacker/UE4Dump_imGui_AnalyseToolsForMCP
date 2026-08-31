@@ -12,7 +12,7 @@ namespace UmtMcp
 {
 // ---------------------------------------------------------------- 协议
 constexpr int kProtocolVersion = 1;
-constexpr uint16_t kDefaultPort = 27185;
+constexpr uint16_t kDefaultPort = 35515;
 constexpr const char *kBindAddress = "127.0.0.1";  // 绝不 0.0.0.0
 
 // ---------------------------------------------------------------- 心跳与超时（协议 §8.1）

@@ -15,7 +15,7 @@
 | 设备端 `src/mcp/` | ✅ **已完整实现**（`CommandServer` + `CommandDispatcher` + `CommandQueue` + `PtraceSession`，共 ~1700 行） |
 | 设备端能力盘点 | ✅ 已有 95%+（L0-L7 全部落地）；`INVALIDATE_PROBE` 单独命令 5 行待补；协议 §8 高级约定（Phase 5）未做 |
 | 43 工具规格 | ✅ 已定稿（A–I 九组，input/output/实现基础/约束齐全），设备端 43 条命令全部注册 |
-| 协议/架构 | ✅ 已定稿（v1.2：stdio + 设备端 127.0.0.1:27185、HELLO+token、命令分级、短等优先、outputSchema、annotations） |
+| 协议/架构 | ✅ 已定稿（v1.2：stdio + 设备端 127.0.0.1:35515、HELLO+token、命令分级、短等优先、outputSchema、annotations） |
 
 **核心结论**：规格与架构已足够成熟，工程风险集中在**两端对接**——设备端命令服务是从未存在的全新代码，PC 侧是与阻塞 I/O 交互的 asyncio 服务。必须用契约 + 骨架 + 切片的方式把风险前移。
 
@@ -51,11 +51,11 @@
 
 | 交付物 | 说明 |
 |---|---|
-| `src/mcp/CommandServer.{hpp,cpp}` | socket `bind(127.0.0.1, 27185)` + HELLO + token 校验 + 换行 JSON 收发 |
+| `src/mcp/CommandServer.{hpp,cpp}` | socket `bind(127.0.0.1, 35515)` + HELLO + token 校验 + 换行 JSON 收发 |
 | `src/mcp/CommandDispatcher.{hpp,cpp}` | 命令分级：快命令直执行 / 重活投队列 |
 | 设备端 3 个 demo 命令 | `PING` / `LIST_PROCESSES`（外迁 `FindAutoProcessCandidates`）/ `GET_LOGS`（接环形缓冲） |
 | PC 侧 `bridge.py` + 接线 | 阻塞 socket 走 `asyncio.to_thread`；`ping`/`getCapabilities` 对接真设备 |
-| `adb_forward` 辅助 | `adb forward tcp:27185 tcp:27185` |
+| `adb_forward` 辅助 | `adb forward tcp:35515 tcp:35515` |
 
 **DoD**：PC `ping` 返回真实 `{deviceBuild, protocolVersion}`；断线重连（指数退避）可演示；单测覆盖协议收发与 hex 编解码。
 
