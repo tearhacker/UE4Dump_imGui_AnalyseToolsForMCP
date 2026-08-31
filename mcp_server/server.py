@@ -19,12 +19,13 @@
 
 from __future__ import annotations
 
+import argparse
 import logging
 import sys
 
 from mcp.server.fastmcp import FastMCP
 
-from src.umt_mcp import config, tools
+from src.umt_mcp import adb, config, tools
 from src.umt_mcp import instructions as ins_mod
 from src.umt_mcp import resources as res_mod
 
@@ -97,6 +98,29 @@ def resource_process() -> str:
 
 
 def main() -> None:
+    """入口：python -m server [--adb <adb路径>] [--port <端口>]
+
+    示例（mcp.json 风格）：
+        python server.py --adb C:/Program Files/platform-tools/adb.exe
+    """
+    parser = argparse.ArgumentParser(prog="umt-mcp", description="UMT MCP Server (PC-side)")
+    parser.add_argument("--adb", default=None,
+                        help="adb 可执行文件绝对路径；缺省走 PATH")
+    parser.add_argument("--port", type=int, default=config.DEFAULT_PORT,
+                        help=f"设备端端口（默认 {config.DEFAULT_PORT}）")
+    args = parser.parse_args()
+
+    if args.adb:
+        adb.set_adb_bin(args.adb)
+    config.DEFAULT_PORT = args.port
+
+    # 启动前做一次 adb 可用性 + 端口转发前置检查（失败仅告警，不阻断启动）
+    ok, msg = adb.setup(args.port)
+    if not ok:
+        logger.warning("adb 前置检查未通过（可稍后手动执行 adb forward）: %s", msg)
+    else:
+        logger.info("%s", msg)
+
     problems = tools.self_check()
     if problems:
         for item in problems:

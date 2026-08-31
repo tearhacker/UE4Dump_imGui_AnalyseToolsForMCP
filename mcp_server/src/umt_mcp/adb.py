@@ -17,19 +17,29 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_PORT = 27185
 
+# 可执行文件路径，默认走 PATH；可用 set_adb_bin() 覆盖（如 mcp.json 传入 --adb）
+_adb_bin = "adb"
+
+
+def set_adb_bin(path: str) -> None:
+    """指定 adb 可执行文件的绝对路径（替代 PATH 查找）。"""
+    global _adb_bin
+    _adb_bin = path
+    logger.info("adb 已指定为: %s", path)
+
 
 def _adb_cmd(*args: str) -> tuple[int, str, str]:
     """执行 adb 命令，返回 (returncode, stdout, stderr)。"""
     try:
         result = subprocess.run(
-            ["adb"] + list(args),
+            [_adb_bin] + list(args),
             capture_output=True,
             text=True,
             timeout=10,
         )
         return result.returncode, result.stdout.strip(), result.stderr.strip()
     except FileNotFoundError:
-        return 1, "", "adb 命令未找到，请确认 Android SDK Platform Tools 已安装并在 PATH 中"
+        return 1, "", f"adb 命令未找到（{_adb_bin}），请确认 Android SDK Platform Tools 已安装、路径正确并在 PATH 中"
     except subprocess.TimeoutExpired:
         return 1, "", "adb 命令超时（10s）"
 
