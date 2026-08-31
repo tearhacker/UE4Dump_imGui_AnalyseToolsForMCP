@@ -1,0 +1,2 @@
+TARGET=Alltear_UnrealMemoryToolsNewMcp/CMakeLists.txt
+CHANGED=UMT_GHIDRA default ON->OFF; Ghidra headers guarded and fallback methods added

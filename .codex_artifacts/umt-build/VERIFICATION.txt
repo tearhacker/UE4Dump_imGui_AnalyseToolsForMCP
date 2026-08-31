@@ -1,0 +1,9 @@
+TARGET: Alltear_UnrealMemoryToolsNewMcp
+BRANCH/FIELD: Android arm64-v8a build; UMT_GHIDRA default/command-line field
+BASELINE: cmd /c build_android.bat
+BASELINE RESULT: FAIL exit 1; GhidraDecompiler.cpp fatal error libdecomp.hh not found, then link undefined Ghidra symbols.
+MODIFIED: cmd /c build_android.bat
+MODIFIED RESULT: BUILD SUCCESS; output UnrealMemoryTools; exit 0.
+ROLLBACK: bash .codex_artifacts/umt-build/ROLLBACK.sh <copy>
+ROLLBACK RESULT: restores original file bytes on a test copy; exit 0.
+RESTORED STATUS: test copy hash equals pre-change hash; working MODIFIED_FILE remains changed.

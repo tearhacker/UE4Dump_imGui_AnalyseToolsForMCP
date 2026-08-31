@@ -56,7 +56,7 @@ echo.
 
 REM ---------- 1. CMake configure ----------
 echo [1/2] CMake configure ...
-"%CMAKE%" -S "%SRC_DIR%" -B "%BUILD_DIR%" -G Ninja -DCMAKE_MAKE_PROGRAM="%NINJA%" -DNDK_PATH=%NDK_PATH%
+"%CMAKE%" -S "%SRC_DIR%" -B "%BUILD_DIR%" -G Ninja -DCMAKE_MAKE_PROGRAM="%NINJA%" -DNDK_PATH=%NDK_PATH% -DUMT_GHIDRA=ON
 if errorlevel 1 (
     echo [ERROR] CMake configure failed
     goto :fail

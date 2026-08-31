@@ -1,0 +1,3 @@
+Alltear_UnrealMemoryToolsNewMcp/CMakeLists.txt: option(UMT_GHIDRA ... OFF), always compile wrapper, add third_party/ghidra_decomp/include for enabled backend.
+Alltear_UnrealMemoryToolsNewMcp/build_android.bat: pass -DUMT_GHIDRA=OFF.
+Alltear_UnrealMemoryToolsNewMcp/third_party/ghidra_decomp/GhidraDecompiler.cpp: compile native calls only when UMT_GHIDRA; return explicit backend-unavailable error otherwise.
