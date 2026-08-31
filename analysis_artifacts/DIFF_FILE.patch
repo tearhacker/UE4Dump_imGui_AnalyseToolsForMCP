@@ -1,11 +1,4 @@
-diff --git a/docs/MCP\345\217\257\347\224\250\345\267\245\345\205\267\346\226\207\346\241\243.md b/analysis_artifacts/MODIFIED_FILE.md
---- a/docs/MCP\345\217\257\347\224\250\345\267\245\345\205\267\346\226\207\346\241\243.md
-+++ b/analysis_artifacts/MODIFIED_FILE.md
-@@ -660,3 +660,5 @@ listModules → resolveSymbol("GWorld")        // 有符号时
- 6. **响应体积硬约束 4K token**：超大结果被截断或要求分页，大文件一律 adb pull。
- 7. **`describeClass` 的 Array/Set/Map 字段只回摘要**，不展开元素。
- 8. **strip 过的 ELF 无符号**：`resolveSymbol` 会失败，回退 `scanPattern`。
-+
-+<!-- ANALYSIS_RECORD: dump path verified for com.huitgames.shikigami.summons -->
-<!-- DOCUMENT_RECORD: docs/式神契约UE4_27_Dump经验技术文档.md delivered and verified -->
-<!-- OPTIMIZATION_DOCUMENT_RECORD: docs/MCP逆向分析UE4工具优化改造文档.md delivered and token-budget verified -->
+--- MCP_ANALYSIS.json
++++ MCP_ANALYSIS.json
+@@
++"dump": "succeeded"
