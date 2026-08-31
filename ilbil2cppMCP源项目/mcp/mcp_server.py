@@ -13,11 +13,14 @@ import subprocess
 import sys
 import threading
 from dataclasses import dataclass
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any, Callable
+from urllib.parse import urlparse
 
 
 SERVER_NAME = "zygisk-il2cpp-mcp"
-SERVER_VERSION = "2.0.0"
+SERVER_VERSION = "2.2.1"
 LATEST_PROTOCOL = "2025-11-25"
 SUPPORTED_PROTOCOLS = {
     "2024-11-05",
@@ -27,6 +30,120 @@ SUPPORTED_PROTOCOLS = {
 }
 MAX_HEADER_BYTES = 16 * 1024
 MAX_BODY_BYTES = 4 * 1024 * 1024
+
+FEATURES: dict[str, str] = {
+    "connection": "Connection and target availability tools",
+    "ui": "Clipboard, input box, and in-app Toast tools",
+    "il2cpp_metadata": "IL2CPP status, dump, metadata listing, and fuzzy search",
+    "il2cpp_invoke": "IL2CPP managed method invocation",
+    "il2cpp_objects": "IL2CPP object, List, array, and Dictionary inspection",
+    "il2cpp_hook": "IL2CPP method hooks",
+    "memory_maps": "Module maps, address ownership, and base resolution",
+    "memory_read": "Native memory reads",
+    "memory_write": "Native memory writes",
+    "memory_search": "Exact, fuzzy, and filtered memory searches",
+    "pointer_chain": "Base scans and multi-level pointer-chain resolution",
+    "dobby": "Native Dobby hooks, symbols, and code patches",
+    "trace": "Dobby execution tracing and trace backtraces",
+    "lua": "Embedded LuaJIT execution",
+    "assembly": "Assembly, disassembly, and instruction patching",
+    "decompiler": "Ghidra-native ARM64 C pseudocode decompilation",
+    "breakpoint": "Hardware breakpoints, watchpoints, hits, and backtraces",
+    "diagnostics": "Runtime capabilities, help, and raw bridge commands",
+}
+
+class FeatureRegistry:
+    """Thread-safe MCP-side feature flags. Every feature defaults to enabled."""
+
+    def __init__(self, config_path: str | os.PathLike[str] | None = None):
+        self._lock = threading.RLock()
+        self._states = {name: True for name in FEATURES}
+        self._config_path = Path(config_path).expanduser() if config_path else None
+        self._listeners: list[Callable[[], None]] = []
+        self._load()
+
+    def _load(self) -> None:
+        if not self._config_path or not self._config_path.is_file():
+            return
+        try:
+            payload = json.loads(self._config_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        states = payload.get("features", payload) if isinstance(payload, dict) else {}
+        if not isinstance(states, dict):
+            return
+        for name, enabled in states.items():
+            if name in self._states and isinstance(enabled, bool):
+                self._states[name] = enabled
+
+    def _save(self) -> None:
+        if not self._config_path:
+            return
+        self._config_path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = self._config_path.with_suffix(self._config_path.suffix + ".tmp")
+        temporary.write_text(
+            json.dumps({"features": self._states}, ensure_ascii=False, indent=2) + "\n",
+            encoding="utf-8",
+        )
+        os.replace(temporary, self._config_path)
+
+    def subscribe(self, listener: Callable[[], None]) -> None:
+        with self._lock:
+            self._listeners.append(listener)
+
+    def enabled(self, name: str) -> bool:
+        with self._lock:
+            return bool(self._states.get(name, False))
+
+    def require(self, tool_name: str) -> None:
+        disabled = [name for name in tool_features(tool_name) if not self.enabled(name)]
+        if disabled:
+            raise BridgeError(
+                f"MCP feature disabled for {tool_name}: {', '.join(disabled)}"
+            )
+
+    def set(self, name: str, enabled: bool) -> dict[str, Any]:
+        if name not in FEATURES:
+            raise BridgeError(f"unknown MCP feature: {name}")
+        if not isinstance(enabled, bool):
+            raise BridgeError("enabled must be a boolean")
+        with self._lock:
+            changed = self._states[name] != enabled
+            self._states[name] = enabled
+            if changed:
+                self._save()
+            listeners = list(self._listeners) if changed else []
+        for listener in listeners:
+            listener()
+        return {"feature": name, "enabled": enabled, "changed": changed}
+
+    def set_all(self, enabled: bool) -> dict[str, Any]:
+        if not isinstance(enabled, bool):
+            raise BridgeError("enabled must be a boolean")
+        with self._lock:
+            changed = any(value != enabled for value in self._states.values())
+            for name in self._states:
+                self._states[name] = enabled
+            if changed:
+                self._save()
+            listeners = list(self._listeners) if changed else []
+        for listener in listeners:
+            listener()
+        return {"enabled": enabled, "changed": changed, "feature_count": len(self._states)}
+
+    def snapshot(self) -> dict[str, Any]:
+        with self._lock:
+            return {
+                "default_enabled": True,
+                "features": [
+                    {
+                        "name": name,
+                        "enabled": self._states[name],
+                        "description": description,
+                    }
+                    for name, description in FEATURES.items()
+                ],
+            }
 
 
 class BridgeError(RuntimeError):
@@ -966,6 +1083,32 @@ TOOLS.extend(
             "annotations": {"openWorldHint": False},
         },
         {
+            "name": "decompiler_status",
+            "title": "Get pseudocode engine status",
+            "description": "Report whether the isolated Ghidra-native ARM64 decompiler is loaded in the target process.",
+            "inputSchema": EMPTY_SCHEMA,
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "decompile_function",
+            "title": "Decompile ARM64 function",
+            "description": "Decompile a bounded ARM64 function with Ghidra/Sleigh using live target memory for referenced strings and globals. Exact IL2CPP method addresses automatically receive managed return, parameter, class, and field-offset types.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "address": {"type": "string", "description": "Runtime function address."},
+                    "size": {"type": "integer", "minimum": 4, "maximum": 65536, "multipleOf": 4, "default": 256},
+                    "max_instructions": {"type": "integer", "minimum": 1, "maximum": 4096, "default": 256},
+                    "max_output_bytes": {"type": "integer", "minimum": 256, "maximum": 1048576, "default": 262144},
+                    "optimize": {"type": "boolean", "default": True},
+                    "stop_at_return": {"type": "boolean", "default": True, "description": "Stop at the first linear RET when an exact function size is unavailable."},
+                },
+                "required": ["address"],
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
             "name": "breakpoint_status",
             "title": "Get hardware breakpoint status",
             "description": "Report ARM64 perf hardware breakpoint support and lazy initialization state.",
@@ -1032,11 +1175,432 @@ TOOLS.extend(
     ]
 )
 
+_invoke_schema = next(tool["inputSchema"] for tool in TOOLS if tool["name"] == "il2cpp_invoke")
+_invoke_schema["properties"]["arguments"]["items"]["anyOf"].extend(
+    [
+        {
+            "type": "object",
+            "properties": {
+                "type": {
+                    "type": "string",
+                    "enum": [
+                        "null", "bool", "i8", "u8", "i16", "u16", "i32", "u32",
+                        "i64", "u64", "f32", "f64", "string", "address", "object", "enum",
+                    ],
+                },
+                "value": {},
+            },
+            "required": ["type", "value"],
+            "additionalProperties": False,
+        },
+        {
+            "type": "object",
+            "properties": {"address": {"type": ["string", "integer"]}},
+            "required": ["address"],
+            "additionalProperties": False,
+        },
+    ]
+)
+
+TOOLS.extend(
+    [
+        {
+            "name": "il2cpp_search",
+            "title": "Fuzzy-search IL2CPP metadata",
+            "description": "Search classes, methods, or fields across one or every loaded IL2CPP image with filters and pagination.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "entity": {"type": "string", "enum": ["class", "method", "field"]},
+                    "query": {"type": "string", "default": ""},
+                    "image_filter": {"type": "string", "default": ""},
+                    "namespace_filter": {"type": "string", "default": ""},
+                    "class_filter": {"type": "string", "default": ""},
+                    "match_mode": {"type": "string", "enum": ["contains", "prefix", "exact"], "default": "contains"},
+                    "case_sensitive": {"type": "boolean", "default": False},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 1000000, "default": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 100},
+                },
+                "required": ["entity"],
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "il2cpp_list_fields",
+            "title": "List IL2CPP fields",
+            "description": "List field types, offsets, flags, and static/literal state for an exact IL2CPP class.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "image": METHOD_LOOKUP_PROPERTIES["image"],
+                    "namespace": METHOD_LOOKUP_PROPERTIES["namespace"],
+                    "class_name": METHOD_LOOKUP_PROPERTIES["class_name"],
+                    "name_filter": {"type": "string", "default": ""},
+                    "include_inherited": {"type": "boolean", "default": False},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 1000000, "default": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 1000, "default": 200},
+                },
+                "required": ["image", "namespace", "class_name"],
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "il2cpp_call",
+            "title": "Call IL2CPP method with arguments",
+            "description": "Alias of il2cpp_invoke with validated primitive, string, enum, null, and object-address arguments.",
+            "inputSchema": _invoke_schema,
+            "annotations": {"openWorldHint": False},
+        },
+        {
+            "name": "il2cpp_object_inspect",
+            "title": "Inspect IL2CPP object fields",
+            "description": "Load a live IL2CPP object by address and return its class plus a bounded page of field values.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "address": {"type": "string"},
+                    "include_inherited": {"type": "boolean", "default": True},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 1000000, "default": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 512, "default": 100},
+                },
+                "required": ["address"],
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "il2cpp_list_items",
+            "title": "Load IL2CPP List or array items",
+            "description": "Read a bounded page from an IL2CPP List<T> or one-dimensional array through runtime metadata.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "address": {"type": "string"},
+                    "offset": {"type": "integer", "minimum": 0, "maximum": 1000000, "default": 0},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 256, "default": 50},
+                },
+                "required": ["address"],
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "il2cpp_dictionary_get",
+            "title": "Load IL2CPP Dictionary value",
+            "description": "Invoke Dictionary<TKey,TValue>.get_Item for a typed key and return the value or managed exception.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "address": {"type": "string"},
+                    "key": {},
+                },
+                "required": ["address", "key"],
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "memory_resolve_address",
+            "title": "Resolve module base plus offset",
+            "description": "Resolve an ASLR-safe address from module name, duplicate occurrence, and signed offset.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "module": {"type": "string"},
+                    "occurrence": {"type": "integer", "minimum": 1, "maximum": 1024, "default": 1},
+                    "offset": {"type": ["string", "integer"], "default": "0x0"},
+                    "base_kind": {"type": "string", "enum": ["load_bias", "start"], "default": "load_bias"},
+                },
+                "required": ["module"],
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "memory_resolve_pointer_chain",
+            "title": "Resolve multi-level pointer chain",
+            "description": "Resolve module base or an absolute base followed by bounded signed offsets and pointer dereferences.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "module": {"type": "string"},
+                    "occurrence": {"type": "integer", "minimum": 1, "maximum": 1024, "default": 1},
+                    "base_address": {"type": ["string", "integer"]},
+                    "base_offset": {"type": ["string", "integer"], "default": "0x0"},
+                    "offsets": {"type": "array", "items": {"type": ["string", "integer"]}, "maxItems": 32, "default": []},
+                    "pointer_size": {"type": "integer", "enum": [4, 8], "default": 8},
+                    "dereference_final": {"type": "boolean", "default": False},
+                },
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "memory_read_pointer_chain",
+            "title": "Read value through pointer chain",
+            "description": "Resolve a pointer chain and read a typed value at its final address.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "module": {"type": "string"}, "occurrence": {"type": "integer", "minimum": 1, "default": 1},
+                    "base_address": {"type": ["string", "integer"]}, "base_offset": {"type": ["string", "integer"], "default": "0x0"},
+                    "offsets": {"type": "array", "items": {"type": ["string", "integer"]}, "maxItems": 32, "default": []},
+                    "pointer_size": {"type": "integer", "enum": [4, 8], "default": 8},
+                    "value_type": MEMORY_VALUE_KIND_SCHEMA,
+                },
+                "required": ["value_type"], "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "memory_write_pointer_chain",
+            "title": "Write value through pointer chain",
+            "description": "Resolve a pointer chain and write a typed value at its final address.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "module": {"type": "string"}, "occurrence": {"type": "integer", "minimum": 1, "default": 1},
+                    "base_address": {"type": ["string", "integer"]}, "base_offset": {"type": ["string", "integer"], "default": "0x0"},
+                    "offsets": {"type": "array", "items": {"type": ["string", "integer"]}, "maxItems": 32, "default": []},
+                    "pointer_size": {"type": "integer", "enum": [4, 8], "default": 8},
+                    "value_type": MEMORY_VALUE_KIND_SCHEMA, "value": {},
+                },
+                "required": ["value_type", "value"], "additionalProperties": False,
+            },
+            "annotations": {"openWorldHint": False},
+        },
+        {
+            "name": "memory_scan_base",
+            "title": "Scan for pointers to a base or address",
+            "description": "Multi-thread scan selected memory regions for pointers to a module base, module offset, or absolute target address.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "module": {"type": "string"}, "occurrence": {"type": "integer", "minimum": 1, "default": 1},
+                    "target_address": {"type": ["string", "integer"]}, "target_offset": {"type": ["string", "integer"], "default": "0x0"},
+                    "pointer_size": {"type": "integer", "enum": [4, 8], "default": 8},
+                    "start": {"type": ["string", "integer"]}, "end": {"type": ["string", "integer"]},
+                    "scan_module": {"type": "string"}, "scan_occurrence": {"type": "integer", "minimum": 1, "default": 1},
+                    "memory_types": MEMORY_REGION_TYPES_SCHEMA,
+                    "max_results": {"type": "integer", "minimum": 1, "maximum": 10000, "default": 1000},
+                    "workers": {"type": "integer", "minimum": 0, "maximum": 32, "default": 0, "description": "Worker threads; 0 selects an automatic value of at least two."},
+                },
+                "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "breakpoint_backtrace",
+            "title": "Read breakpoint-hit backtrace",
+            "description": "Return and module-resolve a frame-pointer backtrace captured with a hardware breakpoint hit.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"hit_id": {"type": "integer", "minimum": 1}, "max_frames": {"type": "integer", "minimum": 1, "maximum": 64, "default": 32}},
+                "required": ["hit_id"], "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+        {
+            "name": "dobby_trace_backtrace",
+            "title": "Read Dobby trace backtrace",
+            "description": "Read the latest register/frame-pointer backtrace captured by a Dobby instrumentation trace.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {"address": {"type": "string"}, "max_frames": {"type": "integer", "minimum": 1, "maximum": 32, "default": 16}},
+                "required": ["address"], "additionalProperties": False,
+            },
+            "annotations": {"readOnlyHint": True, "openWorldHint": False},
+        },
+    ]
+)
+
+
+def tool_features(name: str) -> tuple[str, ...]:
+    if name in {"ping", "connection_info", "configure_connection"}:
+        return ("connection",)
+    if name.startswith("mcp_toast_") or name in {
+        "get_clipboard", "show_input_box", "wait_input", "input_and_wait", "push_input_result"
+    }:
+        return ("ui",)
+    if name in {"il2cpp_invoke", "il2cpp_call"}:
+        return ("il2cpp_metadata", "il2cpp_invoke")
+    if name in {"il2cpp_list_items", "il2cpp_dictionary_get"}:
+        return ("il2cpp_metadata", "il2cpp_invoke", "il2cpp_objects")
+    if name == "il2cpp_object_inspect":
+        return ("il2cpp_metadata", "il2cpp_objects")
+    if name.startswith("il2cpp_hook") or name == "il2cpp_unhook":
+        return ("il2cpp_metadata", "il2cpp_hook")
+    if name.startswith("il2cpp_"):
+        return ("il2cpp_metadata",)
+    if name in {"memory_read", "memory_read_value"}:
+        return ("memory_read",)
+    if name in {"memory_write", "memory_write_value"}:
+        return ("memory_write",)
+    if name in {"memory_resolve_pointer_chain", "memory_read_pointer_chain"}:
+        return ("memory_maps", "memory_read", "pointer_chain")
+    if name == "memory_write_pointer_chain":
+        return ("memory_maps", "memory_read", "memory_write", "pointer_chain")
+    if name == "memory_scan_base":
+        return ("memory_maps", "memory_search", "pointer_chain")
+    if name.startswith("memory_search") or name.startswith("memory_filter"):
+        return ("memory_search",)
+    if name.startswith("memory_"):
+        return ("memory_maps",)
+    if name in {"dobby_instrument", "dobby_trace_get", "dobby_trace_backtrace"}:
+        return ("dobby", "trace")
+    if name.startswith("dobby_"):
+        return ("dobby",)
+    if name.startswith("lua_"):
+        return ("lua",)
+    if name.startswith("assembly_"):
+        return ("assembly",)
+    if name == "decompiler_status" or name == "decompile_function":
+        return ("decompiler",)
+    if name.startswith("breakpoint_"):
+        return ("breakpoint",)
+    if name in {"debug_help", "runtime_capabilities", "raw_hook_call"}:
+        return ("diagnostics",)
+    return ("connection",)
+
+
+def tools_for_registry(registry: FeatureRegistry) -> list[dict[str, Any]]:
+    return [
+        tool for tool in TOOLS
+        if all(registry.enabled(feature) for feature in tool_features(tool["name"]))
+    ]
+
+
+class McpAdminServer:
+    def __init__(self, registry: FeatureRegistry, host: str, port: int, token: str | None = None):
+        if not 1 <= port <= 65535:
+            raise BridgeError("admin port must be between 1 and 65535")
+        if host not in {"127.0.0.1", "localhost", "::1"} and not token:
+            raise BridgeError("a non-loopback MCP admin host requires --admin-token")
+        self.registry = registry
+        self.host = host
+        self.port = port
+        self.token = token or ""
+        self._server: ThreadingHTTPServer | None = None
+
+    @property
+    def url(self) -> str:
+        display_host = "127.0.0.1" if self.host in {"localhost", "::1"} else self.host
+        return f"http://{display_host}:{self.port}/"
+
+    def start(self) -> None:
+        owner = self
+
+        class Handler(BaseHTTPRequestHandler):
+            server_version = "ZygiskMcpAdmin/1.0"
+
+            def log_message(self, format: str, *args: Any) -> None:
+                return
+
+            def _authorized(self) -> bool:
+                if not owner.token:
+                    return True
+                authorization = self.headers.get("Authorization", "")
+                return authorization == f"Bearer {owner.token}" or self.headers.get("X-MCP-Token") == owner.token
+
+            def _send_json(self, status: int, payload: Any) -> None:
+                data = json.dumps(payload, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
+                self.send_response(status)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+
+            def _read_json(self) -> dict[str, Any]:
+                if self.headers.get_content_type() != "application/json":
+                    raise BridgeError("Content-Type must be application/json")
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except ValueError as exc:
+                    raise BridgeError("invalid Content-Length") from exc
+                if length < 0 or length > 64 * 1024:
+                    raise BridgeError("request body is too large")
+                try:
+                    value = json.loads(self.rfile.read(length) or b"{}")
+                except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+                    raise BridgeError("invalid JSON request") from exc
+                if not isinstance(value, dict):
+                    raise BridgeError("JSON request must be an object")
+                return value
+
+            def do_GET(self) -> None:
+                path = urlparse(self.path).path
+                if path == "/api/features":
+                    if not self._authorized():
+                        self._send_json(401, {"error": "unauthorized"})
+                        return
+                    self._send_json(200, owner.registry.snapshot())
+                    return
+                if path != "/":
+                    self._send_json(404, {"error": "not found"})
+                    return
+                page = owner._html_page().encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "text/html; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(page)))
+                self.end_headers()
+                self.wfile.write(page)
+
+            def do_POST(self) -> None:
+                if not self._authorized():
+                    self._send_json(401, {"error": "unauthorized"})
+                    return
+                path = urlparse(self.path).path
+                try:
+                    payload = self._read_json()
+                    if path == "/api/features/all":
+                        result = owner.registry.set_all(payload.get("enabled"))
+                    elif path.startswith("/api/features/"):
+                        name = path[len("/api/features/"):]
+                        result = owner.registry.set(name, payload.get("enabled"))
+                    else:
+                        self._send_json(404, {"error": "not found"})
+                        return
+                except (BridgeError, OSError) as exc:
+                    self._send_json(400, {"error": str(exc)})
+                    return
+                self._send_json(200, result)
+
+        self._server = ThreadingHTTPServer((self.host, self.port), Handler)
+        self._server.daemon_threads = True
+        threading.Thread(target=self._server.serve_forever, name="mcp-admin", daemon=True).start()
+
+    def stop(self) -> None:
+        if self._server is not None:
+            self._server.shutdown()
+            self._server.server_close()
+            self._server = None
+
+    def _html_page(self) -> str:
+        token_required = "true" if self.token else "false"
+        page = """<!doctype html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1\"><title>MCP 功能控制</title><style>
+body{{margin:0;background:#0b1020;color:#e8ecf5;font:15px system-ui,sans-serif}}main{{max-width:920px;margin:auto;padding:32px 18px}}h1{{margin:0 0 8px}}p{{color:#aeb8ca}}.bar{{display:flex;gap:10px;margin:22px 0}}button{{border:0;border-radius:9px;padding:10px 14px;cursor:pointer}}.on{{background:#36d399}}.off{{background:#fb7185}}#list{{display:grid;gap:10px}}.row{{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#151d33;padding:14px;border-radius:12px}}.name{{font-weight:650}}.desc{{font-size:13px;color:#9ca8bd;margin-top:4px}}input{{width:46px;height:24px;accent-color:#36d399}}#status{{min-height:20px;color:#7dd3fc}}</style></head><body><main><h1>MCP 功能控制</h1><p>全部功能默认开启。关闭后该功能会从 Agent 的 tools/list 中移除，并在调用端再次拦截。</p><div class=\"bar\"><button class=\"on\" onclick=\"setAll(true)\">全部开启</button><button class=\"off\" onclick=\"setAll(false)\">全部关闭</button></div><div id=\"status\"></div><div id=\"list\"></div></main><script>
+const tokenRequired=__TOKEN_REQUIRED__;let token=localStorage.getItem('mcpAdminToken')||'';if(tokenRequired&&!token){{token=prompt('请输入 MCP 管理令牌')||'';localStorage.setItem('mcpAdminToken',token)}}
+const headers=()=>Object.assign({{'Content-Type':'application/json'}},token?{{'Authorization':'Bearer '+token}}:{{}});
+async function load(){{const r=await fetch('/api/features',{{headers:headers()}});const d=await r.json();if(!r.ok)throw Error(d.error||r.statusText);list.innerHTML=d.features.map(f=>`<div class=\"row\"><div><div class=\"name\">${{escapeHtml(f.name)}}</div><div class=\"desc\">${{escapeHtml(f.description)}}</div></div><input type=\"checkbox\" ${{f.enabled?'checked':''}} onchange=\"setOne('${{f.name}}',this.checked)\"></div>`).join('');status.textContent='已加载 '+d.features.length+' 个功能开关'}
+async function send(path,enabled){{const r=await fetch(path,{{method:'POST',headers:headers(),body:JSON.stringify({{enabled}})}});const d=await r.json();if(!r.ok)throw Error(d.error||r.statusText);await load()}}
+function setOne(name,enabled){{send('/api/features/'+encodeURIComponent(name),enabled).catch(showError)}}function setAll(enabled){{send('/api/features/all',enabled).catch(showError)}}function showError(e){{status.textContent='错误：'+e.message}}function escapeHtml(v){{const d=document.createElement('div');d.textContent=v;return d.innerHTML}}load().catch(showError)
+</script></body></html>"""
+        return page.replace("__TOKEN_REQUIRED__", token_required).replace("{{", "{").replace("}}", "}")
+
 
 class ToolDispatcher:
-    def __init__(self, config: ConnectionConfig):
+    def __init__(
+        self,
+        config: ConnectionConfig,
+        registry: FeatureRegistry | None = None,
+    ):
         config.validate()
         self.config = config
+        self.registry = registry or FeatureRegistry()
         self._lock = threading.RLock()
 
     def _client(self) -> HookSocketClient:
@@ -1070,8 +1634,14 @@ class ToolDispatcher:
             "il2cpp_list_images": self.il2cpp_list_images,
             "il2cpp_list_classes": self.il2cpp_list_classes,
             "il2cpp_list_methods": self.il2cpp_list_methods,
+            "il2cpp_list_fields": self.il2cpp_list_fields,
+            "il2cpp_search": self.il2cpp_search,
             "il2cpp_find_method": self.il2cpp_find_method,
             "il2cpp_invoke": self.il2cpp_invoke,
+            "il2cpp_call": self.il2cpp_invoke,
+            "il2cpp_object_inspect": self.il2cpp_object_inspect,
+            "il2cpp_list_items": self.il2cpp_list_items,
+            "il2cpp_dictionary_get": self.il2cpp_dictionary_get,
             "il2cpp_hook": self.il2cpp_hook,
             "il2cpp_hook_return": self.il2cpp_hook_return,
             "il2cpp_unhook": self.il2cpp_unhook,
@@ -1083,6 +1653,11 @@ class ToolDispatcher:
             "memory_list_modules": self.memory_list_modules,
             "memory_find_module": self.memory_find_module,
             "memory_address_info": self.memory_address_info,
+            "memory_resolve_address": self.memory_resolve_address,
+            "memory_resolve_pointer_chain": self.memory_resolve_pointer_chain,
+            "memory_read_pointer_chain": self.memory_read_pointer_chain,
+            "memory_write_pointer_chain": self.memory_write_pointer_chain,
+            "memory_scan_base": self.memory_scan_base,
             "memory_search": self.memory_search,
             "memory_search_value": self.memory_search_value,
             "memory_search_exact": self.memory_search_exact,
@@ -1097,6 +1672,7 @@ class ToolDispatcher:
             "dobby_hook_return": self.dobby_hook_return,
             "dobby_instrument": self.dobby_instrument,
             "dobby_trace_get": self.dobby_trace_get,
+            "dobby_trace_backtrace": self.dobby_trace_backtrace,
             "dobby_patch_code": self.dobby_patch_code,
             "dobby_destroy": self.dobby_destroy,
             "dobby_list_hooks": self.dobby_list_hooks,
@@ -1110,10 +1686,13 @@ class ToolDispatcher:
             "assembly_assemble": self.assembly_assemble,
             "assembly_disassemble": self.assembly_disassemble,
             "assembly_patch": self.assembly_patch,
+            "decompiler_status": self.decompiler_status,
+            "decompile_function": self.decompile_function,
             "breakpoint_status": self.breakpoint_status,
             "breakpoint_set": self.breakpoint_set,
             "breakpoint_list": self.breakpoint_list,
             "breakpoint_hits": self.breakpoint_hits,
+            "breakpoint_backtrace": self.breakpoint_backtrace,
             "breakpoint_clear": self.breakpoint_clear,
             "breakpoint_clear_all": self.breakpoint_clear_all,
         }
@@ -1122,6 +1701,7 @@ class ToolDispatcher:
             raise BridgeError(f"unknown tool: {name}")
         if not isinstance(arguments, dict):
             raise BridgeError("tool arguments must be an object")
+        self.registry.require(name)
         with self._lock:
             self._notify_mcp_call(name, arguments)
             return method(arguments)
@@ -1237,6 +1817,48 @@ class ToolDispatcher:
 
     def raw_hook_call(self, args: dict[str, Any]) -> dict[str, Any]:
         command = _single_line(args.get("command", ""), "command").strip()
+        if not command:
+            raise BridgeError("command is required")
+        native_name = command.split(None, 1)[0].upper()
+        if native_name.startswith("IL2CPP_"):
+            if native_name in {"IL2CPP_HOOK", "IL2CPP_HOOK_RETURN", "IL2CPP_UNHOOK"}:
+                raw_features = ("il2cpp_metadata", "il2cpp_hook")
+            elif native_name == "IL2CPP_INVOKE":
+                raw_features = ("il2cpp_metadata", "il2cpp_invoke")
+            elif native_name == "IL2CPP_OBJECT_INSPECT":
+                raw_features = ("il2cpp_metadata", "il2cpp_objects")
+            elif native_name in {"IL2CPP_LIST_ITEMS", "IL2CPP_DICTIONARY_GET"}:
+                raw_features = ("il2cpp_metadata", "il2cpp_invoke", "il2cpp_objects")
+            else:
+                raw_features = ("il2cpp_metadata",)
+        elif native_name.startswith("MEMORY_"):
+            if native_name == "MEMORY_READ":
+                raw_features = ("memory_read",)
+            elif native_name == "MEMORY_WRITE":
+                raw_features = ("memory_write",)
+            elif native_name == "MEMORY_POINTER_SCAN_MT":
+                raw_features = ("memory_maps", "memory_search", "pointer_chain")
+            elif native_name.startswith("MEMORY_SEARCH") or native_name == "MEMORY_FILTER":
+                raw_features = ("memory_search",)
+            else:
+                raw_features = ("memory_maps",)
+        elif native_name.startswith("DOBBY_"):
+            raw_features = ("dobby", "trace") if "TRACE" in native_name or native_name == "DOBBY_INSTRUMENT" else ("dobby",)
+        elif native_name.startswith("BREAKPOINT_"):
+            raw_features = ("breakpoint",)
+        elif native_name.startswith("LUA_"):
+            raw_features = ("lua",)
+        elif native_name.startswith("ASM_"):
+            raw_features = ("assembly",)
+        elif native_name.startswith("DECOMP_"):
+            raw_features = ("decompiler",)
+        else:
+            raw_features = ("diagnostics",)
+        disabled = [feature for feature in raw_features if not self.registry.enabled(feature)]
+        if disabled:
+            raise BridgeError(
+                f"raw command {native_name} is disabled by MCP feature: {', '.join(disabled)}"
+            )
         timeout = float(args.get("timeout", self.config.timeout))
         if not 0.1 <= timeout <= 300:
             raise BridgeError("timeout must be between 0.1 and 300 seconds")
@@ -1307,11 +1929,46 @@ class ToolDispatcher:
     @classmethod
     def _invoke_token(cls, value: Any) -> str:
         if isinstance(value, dict):
-            if set(value) != {"enum"}:
-                raise BridgeError("enum argument object must contain only the enum field")
-            value = value["enum"]
-            if isinstance(value, bool) or not isinstance(value, (str, int)):
-                raise BridgeError("enum argument must be a member name or integer value")
+            if set(value) == {"enum"}:
+                value = value["enum"]
+                if isinstance(value, bool) or not isinstance(value, (str, int)):
+                    raise BridgeError("enum argument must be a member name or integer value")
+            elif set(value) == {"address"}:
+                value = cls._address(value["address"], "argument address")
+            elif set(value) == {"type", "value"}:
+                kind = value["type"]
+                typed_value = value["value"]
+                if kind == "null":
+                    if typed_value is not None:
+                        raise BridgeError("a null argument value must be null")
+                    return "z"
+                if kind == "bool":
+                    if not isinstance(typed_value, bool):
+                        raise BridgeError("a bool argument value must be true or false")
+                    return "b1" if typed_value else "b0"
+                if kind in {"address", "object"}:
+                    value = cls._address(typed_value, "argument address")
+                elif kind == "string":
+                    if not isinstance(typed_value, str):
+                        raise BridgeError("a string argument value must be a string")
+                    value = typed_value
+                elif kind == "enum":
+                    if isinstance(typed_value, bool) or not isinstance(typed_value, (str, int)):
+                        raise BridgeError("an enum argument value must be a member name or integer")
+                    value = typed_value
+                elif kind in {"i8", "u8", "i16", "u16", "i32", "u32", "i64", "u64", "f32", "f64"}:
+                    if isinstance(typed_value, bool) or not isinstance(typed_value, (int, float, str)):
+                        raise BridgeError(f"a {kind} argument value must be numeric")
+                    try:
+                        value = float(typed_value) if kind.startswith("f") else int(str(typed_value), 0)
+                    except ValueError as exc:
+                        raise BridgeError(f"invalid {kind} argument value") from exc
+                else:
+                    raise BridgeError(f"unsupported typed argument: {kind}")
+            else:
+                raise BridgeError(
+                    "argument objects must contain enum, address, or exactly type and value"
+                )
         if value is None:
             return "z"
         if isinstance(value, bool):
@@ -1351,6 +2008,46 @@ class ToolDispatcher:
             raise BridgeError("limit must be between 1 and 5000")
         return self._json_call(f"IL2CPP_METHODS {image} {namespace} {class_name} {name_filter} {limit}")
 
+    def il2cpp_list_fields(self, args: dict[str, Any]) -> dict[str, Any]:
+        image = self._hex_text(self._required_text(args, "image"))
+        namespace = self._hex_text(self._required_text(args, "namespace"))
+        class_name = self._hex_text(self._required_text(args, "class_name"))
+        name_filter = self._hex_text(_single_line(args.get("name_filter", ""), "name_filter"))
+        inherited = args.get("include_inherited", False)
+        if not isinstance(inherited, bool):
+            raise BridgeError("include_inherited must be a boolean")
+        offset = self._bounded_integer(args.get("offset", 0), "offset", 0, 1000000)
+        limit = self._bounded_integer(args.get("limit", 200), "limit", 1, 1000)
+        return self._json_call(
+            f"IL2CPP_FIELDS {image} {namespace} {class_name} {name_filter} "
+            f"{'1' if inherited else '0'} {offset} {limit}"
+        )
+
+    def il2cpp_search(self, args: dict[str, Any]) -> dict[str, Any]:
+        entity = str(args.get("entity", ""))
+        if entity not in {"class", "method", "field"}:
+            raise BridgeError("entity must be class, method, or field")
+        mode = str(args.get("match_mode", "contains"))
+        if mode not in {"contains", "prefix", "exact"}:
+            raise BridgeError("match_mode must be contains, prefix, or exact")
+        case_sensitive = args.get("case_sensitive", False)
+        if not isinstance(case_sensitive, bool):
+            raise BridgeError("case_sensitive must be a boolean")
+        values = [
+            self._hex_text(_single_line(args.get("query", ""), "query")),
+            self._hex_text(_single_line(args.get("image_filter", ""), "image_filter")),
+            self._hex_text(_single_line(args.get("namespace_filter", ""), "namespace_filter")),
+            self._hex_text(_single_line(args.get("class_filter", ""), "class_filter")),
+        ]
+        offset = self._bounded_integer(args.get("offset", 0), "offset", 0, 1000000)
+        limit = self._bounded_integer(args.get("limit", 100), "limit", 1, 1000)
+        return self._json_call(
+            "IL2CPP_SEARCH " + " ".join(
+                [entity, *values, mode, "1" if case_sensitive else "0", str(offset), str(limit)]
+            ),
+            timeout=max(self.config.timeout, 60.0),
+        )
+
     def il2cpp_find_method(self, args: dict[str, Any]) -> dict[str, Any]:
         return self._json_call("IL2CPP_FIND_METHOD " + " ".join(self._lookup_words(args)))
 
@@ -1363,6 +2060,30 @@ class ToolDispatcher:
         encoded = [self._invoke_token(value) for value in values]
         command = "IL2CPP_INVOKE " + " ".join(words + [instance, str(len(encoded)), *encoded])
         return self._json_call(command, timeout=max(self.config.timeout, 30.0))
+
+    def il2cpp_object_inspect(self, args: dict[str, Any]) -> dict[str, Any]:
+        address = self._address(args.get("address"), "address")
+        if int(address, 16) == 0:
+            raise BridgeError("object address cannot be zero")
+        inherited = args.get("include_inherited", True)
+        if not isinstance(inherited, bool):
+            raise BridgeError("include_inherited must be a boolean")
+        offset = self._bounded_integer(args.get("offset", 0), "offset", 0, 1000000)
+        limit = self._bounded_integer(args.get("limit", 100), "limit", 1, 512)
+        return self._json_call(
+            f"IL2CPP_OBJECT_INSPECT {address} {'1' if inherited else '0'} {offset} {limit}"
+        )
+
+    def il2cpp_list_items(self, args: dict[str, Any]) -> dict[str, Any]:
+        address = self._address(args.get("address"), "address")
+        offset = self._bounded_integer(args.get("offset", 0), "offset", 0, 1000000)
+        limit = self._bounded_integer(args.get("limit", 50), "limit", 1, 256)
+        return self._json_call(f"IL2CPP_LIST_ITEMS {address} {offset} {limit}")
+
+    def il2cpp_dictionary_get(self, args: dict[str, Any]) -> dict[str, Any]:
+        address = self._address(args.get("address"), "address")
+        token = self._invoke_token(args.get("key"))
+        return self._json_call(f"IL2CPP_DICTIONARY_GET {address} {token}")
 
     def il2cpp_hook(self, args: dict[str, Any]) -> dict[str, Any]:
         words = self._lookup_words(args)
@@ -1530,6 +2251,188 @@ class ToolDispatcher:
     def memory_address_info(self, args: dict[str, Any]) -> dict[str, Any]:
         address = self._address(self._required_text(args, "address"), "address")
         return self._json_call(f"MEMORY_ADDRESS_INFO {address}")
+
+    @staticmethod
+    def _signed_offset(value: Any, name: str) -> int:
+        if isinstance(value, bool):
+            raise BridgeError(f"{name} must be a signed integer or hexadecimal string")
+        try:
+            parsed = value if isinstance(value, int) else int(str(value), 0)
+        except (TypeError, ValueError):
+            raise BridgeError(f"{name} must be a signed integer or hexadecimal string") from None
+        if not -(1 << 63) <= parsed < (1 << 64):
+            raise BridgeError(f"{name} is outside the supported address range")
+        return parsed
+
+    @staticmethod
+    def _checked_address(value: int, name: str = "address") -> str:
+        maximum = (1 << 64) - 1
+        if not 0 <= value <= maximum:
+            raise BridgeError(f"{name} is outside the supported 64-bit address range")
+        return hex(value)
+
+    def memory_resolve_address(self, args: dict[str, Any]) -> dict[str, Any]:
+        module_name = self._required_text(args, "module")
+        occurrence = self._bounded_integer(args.get("occurrence", 1), "occurrence", 1, 1024)
+        module = self.memory_find_module({"module_name": module_name, "occurrence": occurrence})
+        base_kind = str(args.get("base_kind", "load_bias"))
+        if base_kind not in {"load_bias", "start"}:
+            raise BridgeError("base_kind must be load_bias or start")
+        base_text = module.get(base_kind)
+        if not isinstance(base_text, str):
+            raise BridgeError(f"module lookup did not return {base_kind}")
+        base = int(self._address(base_text, base_kind), 16)
+        offset = self._signed_offset(args.get("offset", "0x0"), "offset")
+        address = self._checked_address(base + offset)
+        return {
+            "module": module,
+            "base_kind": base_kind,
+            "base": hex(base),
+            "offset": hex(offset) if offset >= 0 else f"-0x{-offset:x}",
+            "address": address,
+        }
+
+    def memory_resolve_pointer_chain(self, args: dict[str, Any]) -> dict[str, Any]:
+        has_module = isinstance(args.get("module"), str) and bool(args.get("module"))
+        has_base = "base_address" in args and args.get("base_address") is not None
+        if has_module == has_base:
+            raise BridgeError("provide exactly one of module or base_address")
+        if has_module:
+            resolved = self.memory_resolve_address(
+                {
+                    "module": args["module"],
+                    "occurrence": args.get("occurrence", 1),
+                    "offset": args.get("base_offset", "0x0"),
+                    "base_kind": "load_bias",
+                }
+            )
+            current = int(resolved["address"], 16)
+            origin: dict[str, Any] = resolved
+        else:
+            base = int(self._address(args.get("base_address"), "base_address"), 16)
+            base_offset = self._signed_offset(args.get("base_offset", "0x0"), "base_offset")
+            current = int(self._checked_address(base + base_offset), 16)
+            origin = {"base": hex(base), "base_offset": base_offset}
+        raw_offsets = args.get("offsets", [])
+        if not isinstance(raw_offsets, list) or len(raw_offsets) > 32:
+            raise BridgeError("offsets must be an array with at most 32 entries")
+        pointer_size = self._bounded_integer(args.get("pointer_size", 8), "pointer_size", 4, 8)
+        if pointer_size not in {4, 8}:
+            raise BridgeError("pointer_size must be 4 or 8")
+        pointer_type = f"ptr{pointer_size * 8}"
+        steps: list[dict[str, Any]] = []
+        for index, raw_offset in enumerate(raw_offsets):
+            read_at = self._checked_address(current)
+            read = self.memory_read_value({"address": read_at, "value_type": pointer_type})
+            pointer_text = read.get("value")
+            if not isinstance(pointer_text, str):
+                raise BridgeError(f"pointer read at step {index} did not return an address")
+            pointer = int(pointer_text, 16)
+            offset = self._signed_offset(raw_offset, f"offsets[{index}]")
+            current = int(self._checked_address(pointer + offset, f"pointer step {index}"), 16)
+            steps.append(
+                {
+                    "index": index,
+                    "read_at": read_at,
+                    "pointer": hex(pointer),
+                    "offset": hex(offset) if offset >= 0 else f"-0x{-offset:x}",
+                    "address": hex(current),
+                }
+            )
+        dereference_final = args.get("dereference_final", False)
+        if not isinstance(dereference_final, bool):
+            raise BridgeError("dereference_final must be a boolean")
+        if dereference_final:
+            read_at = self._checked_address(current)
+            read = self.memory_read_value({"address": read_at, "value_type": pointer_type})
+            pointer_text = read.get("value")
+            if not isinstance(pointer_text, str):
+                raise BridgeError("final pointer read did not return an address")
+            current = int(pointer_text, 16)
+            steps.append(
+                {"index": len(steps), "read_at": read_at, "pointer": hex(current), "offset": "0x0", "address": hex(current), "final_dereference": True}
+            )
+        return {
+            "pointer_size": pointer_size,
+            "origin": origin,
+            "steps": steps,
+            "address": hex(current),
+        }
+
+    def memory_read_pointer_chain(self, args: dict[str, Any]) -> dict[str, Any]:
+        chain_args = dict(args)
+        value_type = chain_args.pop("value_type", None)
+        chain_args["dereference_final"] = False
+        chain = self.memory_resolve_pointer_chain(chain_args)
+        value = self.memory_read_value({"address": chain["address"], "value_type": value_type})
+        return {"chain": chain, "read": value}
+
+    def memory_write_pointer_chain(self, args: dict[str, Any]) -> dict[str, Any]:
+        chain_args = dict(args)
+        value_type = chain_args.pop("value_type", None)
+        value = chain_args.pop("value", None)
+        chain_args["dereference_final"] = False
+        chain = self.memory_resolve_pointer_chain(chain_args)
+        written = self.memory_write_value(
+            {"address": chain["address"], "value_type": value_type, "value": value}
+        )
+        return {"chain": chain, "write": written}
+
+    def memory_scan_base(self, args: dict[str, Any]) -> dict[str, Any]:
+        has_module = isinstance(args.get("module"), str) and bool(args.get("module"))
+        has_target = "target_address" in args and args.get("target_address") is not None
+        if has_module == has_target:
+            raise BridgeError("provide exactly one of module or target_address")
+        target_offset = self._signed_offset(args.get("target_offset", "0x0"), "target_offset")
+        if has_module:
+            target_info = self.memory_resolve_address(
+                {
+                    "module": args["module"],
+                    "occurrence": args.get("occurrence", 1),
+                    "offset": target_offset,
+                    "base_kind": "load_bias",
+                }
+            )
+            target = target_info["address"]
+        else:
+            raw_target = int(self._address(args.get("target_address"), "target_address"), 16)
+            target = self._checked_address(raw_target + target_offset, "target address")
+            target_info = {"address": target}
+        pointer_size = self._bounded_integer(args.get("pointer_size", 8), "pointer_size", 4, 8)
+        if pointer_size not in {4, 8}:
+            raise BridgeError("pointer_size must be 4 or 8")
+        max_results = self._bounded_integer(args.get("max_results", 1000), "max_results", 1, 10000)
+        workers = self._bounded_integer(args.get("workers", 0), "workers", 0, 32)
+        if workers == 0:
+            workers = min(32, max(2, os.cpu_count() or 4))
+        memory_types = self._memory_region_types(args)
+        if isinstance(args.get("scan_module"), str) and args.get("scan_module"):
+            scan_module = self.memory_find_module(
+                {
+                    "module_name": args["scan_module"],
+                    "occurrence": args.get("scan_occurrence", 1),
+                }
+            )
+            start = scan_module.get("start")
+            end = scan_module.get("end")
+            if not isinstance(start, str) or not isinstance(end, str):
+                raise BridgeError("scan module lookup did not return a valid address range")
+        else:
+            if "start" not in args or "end" not in args:
+                raise BridgeError("provide scan_module or both start and end")
+            start = self._address(args["start"], "start")
+            end = self._address(args["end"], "end")
+        result = self._json_call(
+            f"MEMORY_POINTER_SCAN_MT {start} {end} {target} {pointer_size} "
+            f"{max_results} {workers} {self._hex_text(memory_types)}",
+            timeout=max(self.config.timeout, 300.0),
+        )
+        return {
+            "target": target_info,
+            "pointer_size": pointer_size,
+            "workers": workers,
+            "search": result,
+        }
 
     @staticmethod
     def _memory_search_pattern(value: Any) -> str:
@@ -1722,6 +2625,33 @@ class ToolDispatcher:
         address = self._address(self._required_text(args, "address"), "address")
         return self._json_call(f"DOBBY_TRACE_GET {address}")
 
+    def _resolve_backtrace_modules(self, result: dict[str, Any]) -> dict[str, Any]:
+        raw_frames = result.get("frames")
+        if not isinstance(raw_frames, list):
+            return result
+        resolve_modules = self.registry.enabled("memory_maps")
+        resolved_frames: list[dict[str, Any]] = []
+        for index, raw_frame in enumerate(raw_frames):
+            address = raw_frame.get("address") if isinstance(raw_frame, dict) else raw_frame
+            frame: dict[str, Any] = {"index": index, "address": address}
+            if isinstance(raw_frame, dict):
+                frame.update(raw_frame)
+            if resolve_modules and isinstance(address, str):
+                try:
+                    info = self.memory_address_info({"address": address})
+                except BridgeError as exc:
+                    frame["module_error"] = str(exc)
+                else:
+                    frame["mapping"] = info
+            resolved_frames.append(frame)
+        return {**result, "frames": resolved_frames}
+
+    def dobby_trace_backtrace(self, args: dict[str, Any]) -> dict[str, Any]:
+        address = self._address(self._required_text(args, "address"), "address")
+        max_frames = self._bounded_integer(args.get("max_frames", 16), "max_frames", 1, 32)
+        result = self._json_call(f"DOBBY_TRACE_BACKTRACE {address} {max_frames}")
+        return self._resolve_backtrace_modules(result)
+
     def dobby_patch_code(self, args: dict[str, Any]) -> dict[str, Any]:
         address = self._address(self._required_text(args, "address"), "address")
         hex_bytes = self._required_text(args, "hex_bytes").strip()
@@ -1742,7 +2672,19 @@ class ToolDispatcher:
         return self._json_call("DOBBY_LIST_HOOKS")
 
     def debug_help(self, args: dict[str, Any]) -> dict[str, Any]:
-        command = _single_line(args.get("command", ""), "command").strip().upper()
+        requested = _single_line(args.get("command", ""), "command").strip()
+        if requested:
+            requested_lower = requested.lower()
+            for tool in tools_for_registry(self.registry):
+                if tool["name"].lower() == requested_lower:
+                    return {
+                        "tool": tool["name"],
+                        "title": tool.get("title"),
+                        "description": tool.get("description"),
+                        "inputSchema": tool.get("inputSchema", EMPTY_SCHEMA),
+                        "features": list(tool_features(tool["name"])),
+                    }
+        command = requested.upper()
         aliases = {
             "MEMORY_SEARCH_FUZZY": "MEMORY_SEARCH_FUZZY",
             "MEMORY_SEARCH_RESULTS": "MEMORY_SEARCH_RESULTS",
@@ -1755,10 +2697,19 @@ class ToolDispatcher:
             "ASSEMBLY_ASSEMBLE": "ASM_ASSEMBLE",
             "ASSEMBLY_DISASSEMBLE": "ASM_DISASSEMBLE",
             "ASSEMBLY_PATCH": "ASM_PATCH",
+            "DECOMPILER_STATUS": "DECOMP_STATUS",
+            "DECOMPILE_FUNCTION": "DECOMP_DECOMPILE",
             "BREAKPOINT_STATUS": "BREAKPOINT_STATUS",
             "BREAKPOINT_SET": "BREAKPOINT_SET",
             "BREAKPOINT_LIST": "BREAKPOINT_LIST",
             "BREAKPOINT_HITS": "BREAKPOINT_HITS",
+            "BREAKPOINT_BACKTRACE": "BREAKPOINT_BACKTRACE",
+            "DOBBY_TRACE_BACKTRACE": "DOBBY_TRACE_BACKTRACE",
+            "IL2CPP_SEARCH": "IL2CPP_SEARCH",
+            "IL2CPP_LIST_FIELDS": "IL2CPP_FIELDS",
+            "IL2CPP_OBJECT_INSPECT": "IL2CPP_OBJECT_INSPECT",
+            "IL2CPP_LIST_ITEMS": "IL2CPP_LIST_ITEMS",
+            "IL2CPP_DICTIONARY_GET": "IL2CPP_DICTIONARY_GET",
             "BREAKPOINT_CLEAR": "BREAKPOINT_CLEAR",
             "BREAKPOINT_CLEAR_ALL": "BREAKPOINT_CLEAR_ALL",
             "RUNTIME_CAPABILITIES": "CAPABILITIES",
@@ -1819,6 +2770,30 @@ class ToolDispatcher:
             raise BridgeError("instruction must contain 1 to 1024 UTF-8 bytes")
         return self._json_call(f"ASM_PATCH {address} {self._hex_text(instruction)}")
 
+    def decompiler_status(self, _: dict[str, Any]) -> dict[str, Any]:
+        return self._json_call("DECOMP_STATUS")
+
+    def decompile_function(self, args: dict[str, Any]) -> dict[str, Any]:
+        address = self._address(self._required_text(args, "address"), "address")
+        size = self._bounded_integer(args.get("size", 256), "size", 4, 65536)
+        if size % 4:
+            raise BridgeError("size must be a multiple of 4 for ARM64")
+        maximum = self._bounded_integer(
+            args.get("max_instructions", 256), "max_instructions", 1, 4096
+        )
+        max_output = self._bounded_integer(
+            args.get("max_output_bytes", 262144), "max_output_bytes", 256, 1048576
+        )
+        optimize = args.get("optimize", True)
+        stop_at_return = args.get("stop_at_return", True)
+        if not isinstance(optimize, bool) or not isinstance(stop_at_return, bool):
+            raise BridgeError("optimize and stop_at_return must be booleans")
+        return self._json_call(
+            f"DECOMP_DECOMPILE {address} {size} {maximum} {max_output} "
+            f"{1 if optimize else 0} {1 if stop_at_return else 0}",
+            timeout=max(self.config.timeout, 60.0),
+        )
+
     def breakpoint_status(self, _: dict[str, Any]) -> dict[str, Any]:
         return self._json_call("BREAKPOINT_STATUS")
 
@@ -1841,6 +2816,12 @@ class ToolDispatcher:
         limit = self._bounded_integer(args.get("limit", 100), "limit", 1, 512)
         return self._json_call(f"BREAKPOINT_HITS {address} {offset} {limit}")
 
+    def breakpoint_backtrace(self, args: dict[str, Any]) -> dict[str, Any]:
+        hit_id = self._bounded_integer(args.get("hit_id"), "hit_id", 1, (1 << 63) - 1)
+        max_frames = self._bounded_integer(args.get("max_frames", 32), "max_frames", 1, 64)
+        result = self._json_call(f"BREAKPOINT_BACKTRACE {hit_id} {max_frames}")
+        return self._resolve_backtrace_modules(result)
+
     def breakpoint_clear(self, args: dict[str, Any]) -> dict[str, Any]:
         address = self._address(self._required_text(args, "address"), "address")
         return self._json_call(f"BREAKPOINT_CLEAR {address}")
@@ -1852,6 +2833,20 @@ class ToolDispatcher:
 class McpServer:
     def __init__(self, dispatcher: ToolDispatcher):
         self.dispatcher = dispatcher
+        self.registry = dispatcher.registry
+        self._write_lock = threading.Lock()
+        self._stdio_active = False
+        self.registry.subscribe(self._notify_tools_changed)
+
+    def _write_message(self, message: dict[str, Any]) -> None:
+        payload = json.dumps(message, ensure_ascii=False, separators=(",", ":"))
+        with self._write_lock:
+            sys.stdout.buffer.write(payload.encode("utf-8") + b"\n")
+            sys.stdout.buffer.flush()
+
+    def _notify_tools_changed(self) -> None:
+        if self._stdio_active:
+            self._write_message({"jsonrpc": "2.0", "method": "notifications/tools/list_changed"})
 
     @staticmethod
     def _success(request_id: Any, result: Any) -> dict[str, Any]:
@@ -1894,7 +2889,7 @@ class McpServer:
                 request_id,
                 {
                     "protocolVersion": protocol,
-                    "capabilities": {"tools": {"listChanged": False}},
+                    "capabilities": {"tools": {"listChanged": True}},
                     "serverInfo": {
                         "name": SERVER_NAME,
                         "title": "Zygisk Runtime MCP Bridge",
@@ -1907,7 +2902,7 @@ class McpServer:
         if method == "ping":
             return self._success(request_id, {})
         if method == "tools/list":
-            return self._success(request_id, {"tools": TOOLS})
+            return self._success(request_id, {"tools": tools_for_registry(self.registry)})
         if method == "tools/call":
             params = message.get("params") or {}
             if not isinstance(params, dict):
@@ -1924,6 +2919,7 @@ class McpServer:
         return self._error(request_id, -32601, f"Method not found: {method}")
 
     def run_stdio(self) -> None:
+        self._stdio_active = True
         for raw_line in sys.stdin.buffer:
             if not raw_line.strip():
                 continue
@@ -1934,9 +2930,7 @@ class McpServer:
             else:
                 response = self.handle(message)
             if response is not None:
-                payload = json.dumps(response, ensure_ascii=False, separators=(",", ":"))
-                sys.stdout.buffer.write(payload.encode("utf-8") + b"\n")
-                sys.stdout.buffer.flush()
+                self._write_message(response)
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -1951,6 +2945,23 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--direct",
         action="store_true",
         help="Run on the target Android machine and connect directly; disables ADB forwarding",
+    )
+    parser.add_argument("--admin-host", default=os.environ.get("ZYGISK_MCP_ADMIN_HOST", "127.0.0.1"))
+    parser.add_argument(
+        "--admin-port",
+        type=int,
+        default=int(os.environ.get("ZYGISK_MCP_ADMIN_PORT", "27185")),
+        help="Browser feature-control port (default: 27185)",
+    )
+    parser.add_argument("--admin-token", default=os.environ.get("ZYGISK_MCP_ADMIN_TOKEN"))
+    parser.add_argument("--no-admin", action="store_true", help="Disable the browser feature-control server")
+    parser.add_argument(
+        "--feature-config",
+        default=os.environ.get(
+            "ZYGISK_MCP_FEATURE_CONFIG",
+            str(Path(__file__).with_name("mcp_features.json")),
+        ),
+        help="JSON file used to persist MCP feature switches",
     )
     return parser.parse_args(argv)
 
@@ -1970,7 +2981,15 @@ def main(argv: list[str] | None = None) -> int:
     except BridgeError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
-    McpServer(ToolDispatcher(config)).run_stdio()
+    registry = FeatureRegistry(args.feature_config)
+    if not args.no_admin:
+        try:
+            admin = McpAdminServer(registry, args.admin_host, args.admin_port, args.admin_token)
+            admin.start()
+            print(f"MCP browser control: {admin.url}", file=sys.stderr)
+        except (BridgeError, OSError) as exc:
+            print(f"MCP browser control disabled: {exc}", file=sys.stderr)
+    McpServer(ToolDispatcher(config, registry)).run_stdio()
     return 0
 
 

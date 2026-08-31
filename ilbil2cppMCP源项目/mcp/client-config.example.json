@@ -3,7 +3,7 @@
     "zygisk-il2cpp": {
       "command": "D:/Program Files (x86)/python3.14.6/python.exe",
       "args": [
-        "D:/mcp_server.py",
+        "D:/AndroidStudioProjects/Zygisk-il2cpp-mcp/mcp/mcp_server.py",
         "--port",
         "27184",
         "--adb",

@@ -1,0 +1,14 @@
+<?xml version="1.1" encoding="UTF-8"?>
+<language_definitions>
+  <language processor="AARCH64"
+            endian="little"
+            size="64"
+            variant="v8A"
+            version="1.6"
+            slafile="AARCH64.sla"
+            processorspec="AARCH64.pspec"
+            id="AARCH64:LE:64:v8A">
+    <description>Generic ARM64 v8.5-A little-endian</description>
+    <compiler name="default" spec="AARCH64.cspec" id="default"/>
+  </language>
+</language_definitions>

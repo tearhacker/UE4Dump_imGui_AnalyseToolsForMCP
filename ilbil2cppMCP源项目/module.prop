@@ -1,7 +1,7 @@
 id=zygisk_il2cpp_mcp
 name=ZYGISK IL2CPP MCP
-version=v2.0.0
-versionCode=200
+version=v2.2.1
+versionCode=221
 author=洋葱落日
 description=通过 Zygisk、IL2CPP 与 Dobby 提供可由 MCP 调用的运行时 Hook
 minMagisk=20400
