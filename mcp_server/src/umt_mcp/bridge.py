@@ -41,18 +41,26 @@ class UmtBridge:
 
     def __init__(
         self,
-        host: str = config.HOST,
+        host: str | None = None,
         port: int | None = None,
         *,
         auto_forward: bool | None = None,
     ) -> None:
-        self._host = host
+        # 🔴 host 默认值必须是 None，再在函数体内取 config.HOST。
+        # 写成 `host: str = config.HOST` 时默认值在 **import 期**就求值了，
+        # 运行期再改 config.HOST（如 server.py 的 --host）完全无效。
+        self._host = config.HOST if host is None else host
         self._port = config.DEFAULT_PORT if port is None else port
-        self._auto_forward = (
-            host == config.HOST and port is None
-            if auto_forward is None
-            else auto_forward
-        )
+
+        # adb forward 只对「目标是本机回环」有意义；
+        # 直连模式（--no-adb）或连接局域网 IP 时都不需要隧道。
+        if auto_forward is None:
+            auto_forward = (
+                not config.DISABLE_ADB
+                and self._host in config.LOOPBACK_HOSTS
+                and port is None
+            )
+        self._auto_forward = auto_forward
 
         self._sock: socket.socket | None = None
         self._reader: threading.Thread | None = None
@@ -139,10 +147,17 @@ class UmtBridge:
                 )
                 time.sleep(delay)
 
+        hint = (
+            f"直连模式（--no-adb）：未走 adb 隧道。\n"
+            f"请确认：1) 设备端 UMT 已启动  2) {self._host}:{self._port} 从本机可达\n"
+            f"        3) 设备端监听地址允许该来源（默认只监听 127.0.0.1）"
+            if config.DISABLE_ADB
+            else "PC 侧已自动检查并建立 adb forward，无需手工输入命令。\n"
+                 "请确认：1) 手机已连接并授权 USB 调试  2) UMT 已启动并在运行"
+        )
         raise proto.UmtConnectionError(
             f"无法连接设备端 {self._host}:{self._port}（已试 {attempt} 次）。\n"
-            f"PC 侧已自动检查并建立 adb forward，无需手工输入命令。\n"
-            f"请确认：1) 手机已连接并授权 USB 调试  2) UMT 已启动并在运行\n"
+            f"{hint}\n"
             f"底层错误：{last_exc}"
         )
 

@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "ue4dump-mcp": {
+      "command": "python3",
+      "args": [
+        "/root/umt_mcp/server.py",
+        "--no-adb",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "35515"
+      ]
+    }
+  }
+}

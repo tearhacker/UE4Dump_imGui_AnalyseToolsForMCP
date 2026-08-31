@@ -47,16 +47,22 @@ for _fn in tools.TOOLS:
 @mcp.resource("umt://protocol")
 def resource_protocol() -> str:
     """设备端协议要点速查 —— 排障时先读这个。"""
+    transport = (
+        f"TCP {config.HOST}:{config.DEFAULT_PORT}"
+        + ("（直连模式：不经 adb 隧道）" if config.DISABLE_ADB
+           else "（设备端是服务端，仅经 adb forward 暴露）")
+    )
     return (
         "UMT 设备端 wire protocol 要点\n"
         "================================\n"
-        f"传输: TCP 127.0.0.1:{config.DEFAULT_PORT}（设备端是服务端，仅经 adb forward 暴露）\n"
+        f"传输: {transport}\n"
         f"帧格式: NDJSON，每行一个 JSON 对象，\\n 结尾，单帧上限 {config.MAX_FRAME_SIZE} 字节\n"
         "握手: 设备端先发 HELLO → PC 校验协议版本 → 直接发送命令（无需认证）\n"
         f"心跳: 设备端每 {config.HEARTBEAT_INTERVAL}s 一帧；"
         f"PC 侧超过 {config.HEARTBEAT_TIMEOUT}s 无心跳即判定进程假死并断开重连\n"
         f"命令硬超时: {config.CMD_TIMEOUT}s（设备端侧）\n"
         "串行: 严格一问一答，PC 侧用 RLock 排队，不支持并发\n"
+        "单客户端: 设备端同一时刻只服务一个连接，第二个会拿不到 HELLO 而挂起，切勿同时连\n"
         "重连: 指数退避 1/2/4…≤30s；重连后所有 sessionId/candidate/job 立即作废\n"
         "\n"
         "错误分层（协议 §5）\n"
@@ -95,28 +101,44 @@ def resource_process() -> str:
 
 
 def main() -> None:
-    """入口：python -m server [--adb <adb路径>] [--port <端口>]
+    """入口：python server.py [--adb <adb路径>] [--host <地址>] [--port <端口>] [--no-adb]
 
-    示例（mcp.json 风格）：
-        python server.py --adb C:/Program Files/platform-tools/adb.exe
+    三种连接模式：
+        adb 隧道（默认）  python server.py --adb <path>
+        局域网直连        python server.py --no-adb --host 192.168.1.23
+        同机直连(Operit)  python server.py --no-adb --host 127.0.0.1
     """
     parser = argparse.ArgumentParser(prog="umt-mcp", description="UMT MCP Server (PC-side)")
     parser.add_argument("--adb", default=None,
                         help="adb 可执行文件绝对路径；缺省走 PATH")
+    parser.add_argument("--host", default=config.HOST,
+                        help=f"设备端地址（默认 {config.HOST}）。"
+                             f"填设备局域网 IP 即为直连（需设备端 bind 已放开）")
     parser.add_argument("--port", type=int, default=config.DEFAULT_PORT,
                         help=f"设备端端口（默认 {config.DEFAULT_PORT}）")
+    parser.add_argument("--no-adb", action="store_true",
+                        help="直连模式：跳过 adb forward，直接连 --host:--port。"
+                             "用于与设备端同机（手机端 Operit）或局域网直连")
     args = parser.parse_args()
 
     if args.adb:
         adb.set_adb_bin(args.adb)
+
+    # 🔴 必须在任何 bridge 创建之前生效（get_bridge() 是懒加载的，此处赋值来得及）
+    config.HOST = args.host
     config.DEFAULT_PORT = args.port
+    config.DISABLE_ADB = args.no_adb
 
     # 启动时预热一次；USB 晚插入或隧道丢失时，bridge 会在连接前继续自动恢复。
-    ok, msg = adb.setup(args.port)
-    if not ok:
-        logger.warning("ADB 自动连接预热暂未完成，首次工具调用会继续自动重试: %s", msg)
+    if config.DISABLE_ADB:
+        logger.info("直连模式（--no-adb）：目标 %s:%d，不建立 adb 隧道",
+                    config.HOST, config.DEFAULT_PORT)
     else:
-        logger.info("ADB 无感连接已就绪: %s", msg.replace("\n", "；"))
+        ok, msg = adb.setup(args.port)
+        if not ok:
+            logger.warning("ADB 自动连接预热暂未完成，首次工具调用会继续自动重试: %s", msg)
+        else:
+            logger.info("ADB 无感连接已就绪: %s", msg.replace("\n", "；"))
 
     problems = tools.self_check()
     if problems:

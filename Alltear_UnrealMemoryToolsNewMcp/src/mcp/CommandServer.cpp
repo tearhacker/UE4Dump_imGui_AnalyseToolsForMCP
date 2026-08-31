@@ -2,6 +2,7 @@
 
 #include <chrono>
 #include <cerrno>
+#include <cstdio>
 #include <cstring>
 #include <ctime>
 #include <vector>
@@ -27,10 +28,54 @@ std::thread CommandServer::thread_;
 std::string CommandServer::buildVersion_ = "1.0.0";
 uint16_t CommandServer::port_ = kDefaultPort;
 CommandQueue *CommandServer::queue_ = nullptr;
+// 🔴 默认只监听回环。可被 mcp_bind.conf 或 SetBindAddress() 覆盖。
+std::string CommandServer::bindAddress_ = kBindAddress;
 
 bool CommandServer::IsRunning()
 {
     return running_.load();
+}
+
+void CommandServer::SetBindAddress(const std::string &addr)
+{
+    bindAddress_ = addr.empty() ? kBindAddress : addr;
+}
+
+const std::string &CommandServer::GetBindAddress()
+{
+    return bindAddress_;
+}
+
+void CommandServer::LoadBindAddressFromConfig()
+{
+    // 文件不存在是常态（默认只监听回环），不是错误，静默返回即可。
+    FILE *f = ::fopen(kBindConfigPath, "r");
+    if (!f)
+        return;
+
+    char buf[64] = {0};
+    if (::fgets(buf, sizeof(buf), f))
+    {
+        const std::string line(buf);
+        const auto b = line.find_first_not_of(" \t\r\n");
+        const auto e = line.find_last_not_of(" \t\r\n");
+        if (b != std::string::npos && e != std::string::npos)
+        {
+            const std::string addr = line.substr(b, e - b + 1);
+            bindAddress_ = addr;
+            if (addr != kBindAddress)
+            {
+                LOGW("[MCP] 警告：监听非回环地址 %s，服务将暴露到网络。"
+                     "root 级内存读写接口，仅在可信网络下使用。",
+                     addr.c_str());
+            }
+            else
+            {
+                LOGI("[MCP] 配置文件指定监听 %s", addr.c_str());
+            }
+        }
+    }
+    ::fclose(f);
 }
 
 bool CommandServer::Start(uint16_t port, CommandQueue *queue, const std::string &buildVersion)
@@ -45,6 +90,10 @@ bool CommandServer::Start(uint16_t port, CommandQueue *queue, const std::string 
     if (!buildVersion.empty())
         buildVersion_ = buildVersion;
     stopRequested_.store(false);
+
+    // 运行期 bind 地址覆盖：读 mcp_bind.conf。
+    // 文件缺失或内容非法 → bindAddress_ 保持默认 127.0.0.1，安全红线不放松。
+    LoadBindAddressFromConfig();
 
     // 注：此处不 detach，由 Stop() 统一 join 回收，避免线程泄漏
     // （见 Stop() 说明；单连接串行模型下关闭代价可控）。
@@ -210,17 +259,19 @@ void CommandServer::ServerLoop()
     sockaddr_in addr{};
     addr.sin_family = AF_INET;
     addr.sin_port = htons(port_);
-    // 🔴 安全红线：只监听回环，绝不 0.0.0.0
-    if (::inet_pton(AF_INET, kBindAddress, &addr.sin_addr) != 1)
+    // 🔴 安全红线：默认只监听回环（kBindAddress）。
+    // 非回环（0.0.0.0 / 局域网 IP）必须显式写 mcp_bind.conf 才生效。
+    const std::string &bindAddr = bindAddress_;
+    if (::inet_pton(AF_INET, bindAddr.c_str(), &addr.sin_addr) != 1)
     {
-        LOGE("[MCP] 地址解析失败: %s", kBindAddress);
+        LOGE("[MCP] 地址解析失败: %s", bindAddr.c_str());
         ::close(serverFd);
         return;
     }
 
     if (::bind(serverFd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) < 0)
     {
-        LOGE("[MCP] bind %s:%u 失败: %s", kBindAddress, port_, strerror(errno));
+        LOGE("[MCP] bind %s:%u 失败: %s", bindAddr.c_str(), port_, strerror(errno));
         ::close(serverFd);
         return;
     }
@@ -234,7 +285,7 @@ void CommandServer::ServerLoop()
     }
 
     running_.store(true);
-    LOGI("[MCP] 命令服务已启动 %s:%u", kBindAddress, port_);
+    LOGI("[MCP] 命令服务已启动 %s:%u", bindAddress_.c_str(), port_);
 
     while (!stopRequested_.load())
     {

@@ -6,14 +6,19 @@
 from __future__ import annotations
 
 # ---------------------------------------------------------------- 连接
-# 设备端 CommandServer 强制 bind 127.0.0.1，仅经 adb forward 暴露。
-# PC 侧绝不可连设备的局域网 IP。
+# 设备端 CommandServer 默认 bind 127.0.0.1，经 adb forward 暴露给 PC。
 HOST = "127.0.0.1"
 DEFAULT_PORT = 35515
 
-# adb forward 隧道（PC 侧 → 设备端）
-ADB_FORWARD_SPEC = f"tcp:{DEFAULT_PORT}"
-ADB_FORWARD_ARGS = ["forward", f"tcp:{DEFAULT_PORT}", f"tcp:{DEFAULT_PORT}"]
+# 直连模式：True 时跳过 adb forward，直接连 HOST:DEFAULT_PORT。
+# 两种场景需要它：
+#   1) MCP server 与设备端同机（手机端 Operit 内运行本 server）—— 同机回环无需隧道
+#   2) 设备端已 bind 到局域网 IP（改过 mcp_bind.conf）—— 本就能直连
+# 命令行用 --no-adb 开启。
+DISABLE_ADB = False
+
+# adb forward 只在连接目标是本机回环时才有意义（隧道两端都是 127.0.0.1）
+LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 # ---------------------------------------------------------------- 重连（v1.2 issue #5）
 # USB 拔插 / adb 掉线 / UMT 被杀是最高频故障

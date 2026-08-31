@@ -4005,7 +4005,16 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
         ImGui::TextDisabled("%s", Tr("监听地址", "Listen Address"));
-        ImGui::Text("127.0.0.1:%d", static_cast<int>(UmtMcp::kDefaultPort));
+        // 反映运行期实际值：默认 127.0.0.1，写了 mcp_bind.conf 后会变成配置的地址
+        ImGui::Text("%s:%d", UmtMcp::CommandServer::GetBindAddress().c_str(),
+                    static_cast<int>(UmtMcp::kDefaultPort));
+        // 非回环即放开到网络，UI 上给红色警告，避免用户忘了自己改过配置
+        if (UmtMcp::CommandServer::GetBindAddress() != UmtMcp::kBindAddress)
+        {
+            ImGui::TextColored(ImVec4(0.92f, 0.36f, 0.36f, 1.0f), "%s",
+                               Tr("已暴露到网络，仅在可信网络下使用",
+                                  "Exposed to network; trusted networks only"));
+        }
 
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
         ImGui::TextDisabled("%s", Tr("连接方式", "Connection"));

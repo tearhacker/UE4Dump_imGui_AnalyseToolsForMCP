@@ -60,13 +60,18 @@ def get_capabilities_summary() -> str:
 
 def get_config_summary() -> str:
     """返回 PC 侧配置摘要（不含 token 等敏感信息）。"""
+    if config.DISABLE_ADB:
+        link = "连接方式: 直连（--no-adb，不经 adb 隧道）"
+    else:
+        link = (f"连接方式: adb forward，自动维护 "
+                f"tcp:{config.DEFAULT_PORT} → tcp:{config.DEFAULT_PORT}")
     return (
         f"UMT MCP Server 配置\n"
         f"{'=' * 40}\n"
         f"服务器名: {config.SERVER_NAME}\n"
         f"版本: {config.SERVER_VERSION}\n"
         f"设备端地址: {config.HOST}:{config.DEFAULT_PORT}\n"
-        f"adb forward: 自动维护 tcp:{config.DEFAULT_PORT} → tcp:{config.DEFAULT_PORT}\n"
+        f"{link}\n"
         f"心跳间隔: {config.HEARTBEAT_INTERVAL}s\n"
         f"心跳超时: {config.HEARTBEAT_TIMEOUT}s\n"
         f"命令硬超时: {config.CMD_TIMEOUT}s\n"

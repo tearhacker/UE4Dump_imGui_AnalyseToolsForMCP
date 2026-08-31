@@ -340,6 +340,59 @@ def test_connection_refused_reports_actionable_hint() -> None:
     assert "adb forward" in str(exc.value)
 
 
+# ------------------------------------------------------- 三种连接模式
+def test_host_default_is_not_frozen_at_import_time() -> None:
+    """🔴 回归：默认参数在 import 期求值，`host: str = config.HOST` 会让 --host 失效。
+
+    必须写成 `host: str | None = None` 再在函数体内取 config.HOST，
+    否则 server.py 的 --host 改了 config.HOST 也读不到。
+    """
+    original = config.HOST
+    try:
+        config.HOST = "192.168.1.23"
+        b = br.UmtBridge()                 # 不传 host，走默认
+        assert b._host == "192.168.1.23"   # 冻结时这里会是 127.0.0.1
+    finally:
+        config.HOST = original
+
+
+def test_auto_forward_only_for_loopback_when_adb_enabled(
+    monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """adb forward 只在「目标是本机回环 + 未禁用 adb」时才有意义。"""
+    original_host = config.HOST
+    original_disable = config.DISABLE_ADB
+    try:
+        config.DISABLE_ADB = False
+        config.HOST = "127.0.0.1"
+        assert br.UmtBridge()._auto_forward is True      # 默认 adb 隧道
+
+        config.HOST = "192.168.1.23"
+        assert br.UmtBridge()._auto_forward is False     # 局域网直连，无需隧道
+
+        config.DISABLE_ADB = True
+        config.HOST = "127.0.0.1"
+        assert br.UmtBridge()._auto_forward is False     # --no-adb 同机直连
+    finally:
+        config.HOST = original_host
+        config.DISABLE_ADB = original_disable
+
+
+def test_direct_mode_hint_omits_adb_advice(monkeypatch: pytest.MonkeyPatch) -> None:
+    """直连模式连不上时，不该再让用户去查 USB 调试（那是 adb 隧道的排查项）。"""
+    original = config.DISABLE_ADB
+    try:
+        config.DISABLE_ADB = True
+        b = br.UmtBridge(host="127.0.0.1", port=1, auto_forward=False)
+        with pytest.raises(proto.UmtConnectionError) as exc:
+            b.connect(max_attempts=1)
+        msg = str(exc.value)
+        assert "直连模式" in msg
+        assert "USB 调试" not in msg        # adb 专属排查项不该出现
+    finally:
+        config.DISABLE_ADB = original
+
+
 # ---------------------------------------------------------------- 工具层
 def test_self_check_passes() -> None:
     """每个工具推导出的命令名必须真实存在于设备端。"""

@@ -29,7 +29,16 @@ public:
     static void Stop();
     static bool IsRunning();
 
+    // 🔴 运行期覆盖监听地址。传空串则回退到 kBindAddress(127.0.0.1)。
+    // 需在 Start() 之前调用；Start() 内部会自动读取 mcp_bind.conf。
+    // 放开到非回环（0.0.0.0 / 局域网 IP）= 把 root 级内存读写暴露到网络。
+    static void SetBindAddress(const std::string &addr);
+    static const std::string &GetBindAddress();
+
 private:
+    // 从 kBindConfigPath 读取可选的 bind 覆盖；文件缺失/为空则保持默认值。
+    static void LoadBindAddressFromConfig();
+
     static void ServerLoop();
 
     // 帧收发（NDJSON）
@@ -48,6 +57,7 @@ private:
     static std::string buildVersion_;
     static uint16_t port_;
     static CommandQueue *queue_;
+    static std::string bindAddress_;   // 运行期 bind 地址，默认 kBindAddress
 };
 
 }  // namespace UmtMcp

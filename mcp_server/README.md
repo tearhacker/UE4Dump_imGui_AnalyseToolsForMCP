@@ -84,10 +84,32 @@ Set-Location "D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\
 ## Run (stdio)
 
 ```powershell
+# 模式 1：adb 隧道（默认，需 USB 连接）
 & "C:\Program Files\Python310\python.exe" .\server.py `
     --port 35515 `
     --adb "C:\Program Files\platform-tools\adb.exe"
+
+# 模式 2：局域网直连（免 USB 线，需设备端 bind 已放开，见下节）
+& "C:\Program Files\Python310\python.exe" .\server.py `
+    --no-adb --host 192.168.1.23 --port 35515
+
+# 模式 3：同机直连（手机端 Operit 内运行本 server，无需 ADB）
+python3 server.py --no-adb --host 127.0.0.1 --port 35515
 ```
+
+| 参数 | 说明 |
+|---|---|
+| `--adb <路径>` | adb 可执行文件绝对路径；缺省走 PATH。仅 adb 隧道模式需要 |
+| `--host <地址>` | 设备端地址，默认 `127.0.0.1`。填设备局域网 IP 即为直连 |
+| `--port <端口>` | 设备端端口，默认 `35515` |
+| `--no-adb` | 直连模式：跳过 adb forward，直接连 `--host:--port` |
+
+`--no-adb` 的两种用途：
+
+1. **与设备端同机**（手机端 Operit）—— Operit 与 UMT 在同一台设备、同一 network namespace，
+   `127.0.0.1:35515` 本机回环直连可达。adb forward 是「PC → 手机」的跨机隧道，同机场景下
+   是给自己转自己，且 Operit 的 Ubuntu 环境里没有可用的 adb server。
+2. **局域网直连** —— 设备端已 bind 到局域网 IP 时，本就能直连，无需隧道。
 
 `stdout` 专用于 MCP stdio 协议，运行日志只写 `stderr`。启动顺序是：解析参数 → 设置 ADB
 路径和端口 → 尝试预热自动 forward → 执行 `tools.self_check()` → 启动 FastMCP。ADB 预热失败
@@ -120,11 +142,54 @@ Set-Location "D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\
 配置中不需要 `env` 或 `UMT_TOKEN`。代码或配置更新后重启 MCP 客户端，使其重新拉起
 `server.py` 进程。
 
+### 手机端 Operit（同机直连）
+
+配置文件：[`客户端配置-手机端Operit.json`](./客户端配置-手机端Operit.json)
+
+```json
+{
+  "mcpServers": {
+    "ue4dump-mcp": {
+      "command": "python3",
+      "args": ["/root/umt_mcp/server.py", "--no-adb",
+               "--host", "127.0.0.1", "--port", "35515"]
+    }
+  }
+}
+```
+
+前提：在 Operit 的 Ubuntu 24 环境里把 `mcp_server/` 放好（如 `/root/umt_mcp/`）并
+`pip install mcp`。`args` 里的路径按实际放置位置调整。
+
+proot/chroot 默认共享宿主 network namespace，所以 chroot 内的 `127.0.0.1:35515` 就是宿主
+的端口，可以直接连。若你的环境用了独立 netns，先用下面这条确认连通性：
+
+```bash
+python3 -c "import socket; socket.create_connection(('127.0.0.1', 35515), 3); print('ok')"
+```
+
+### 局域网直连（免 USB 线）
+
+设备端默认只监听 `127.0.0.1`。要放开到局域网，在手机上写配置文件后重启游戏：
+
+```bash
+adb shell "echo 192.168.1.23 > /sdcard/UnrealMemoryTools/mcp_bind.conf"
+```
+
+然后 PC 侧用 `--no-adb --host 192.168.1.23` 连接。
+
+> 🔴 **安全提醒**：UMT 以 root 运行、无认证、提供内存读写接口。放开到非回环地址等于把
+> 这些能力暴露给同网段的任何设备，**只在可信网络（如家庭/实验室内网）下使用**。
+> 不要用 `0.0.0.0`，它会连蜂窝网卡一起暴露。用完记得删掉配置文件并重启游戏。
+
 ## 自动连接时序
 
-1. `server.py` 启动时调用 `adb.setup(35515)`，自动启动 ADB daemon、检查在线设备并预热转发。
-2. 生产 bridge 第一次创建时读取运行期 `config.DEFAULT_PORT`，不使用导入时缓存端口。
-3. 每次 socket 连接前再次调用 `adb.setup(port, force=False)`；已有精确转发时直接复用。
+1. **adb 隧道模式**：`server.py` 启动时调用 `adb.setup(35515)`，自动启动 ADB daemon、检查
+   在线设备并预热转发。**直连模式（--no-adb）跳过这一步。**
+2. 生产 bridge 第一次创建时读取运行期 `config.HOST` / `config.DEFAULT_PORT`，
+   不使用导入时缓存值（默认参数在 import 期求值，必须写成 `None` 再在函数体内取）。
+3. 每次 socket 连接前，仅当目标是本机回环且未禁用 adb 时，才调用
+   `adb.setup(port, force=False)`；已有精确转发时直接复用。
 4. socket 首次失败后，下一次尝试使用 `force=True` 重新下发 forward，修复陈旧或丢失隧道。
 5. 收到设备端 `HELLO` 后只校验 protocol 版本，随后直接发送命令，不发送认证帧。
 6. USB 晚插入、ADB 重启或转发表丢失时，后续 MCP 调用重复上述流程，无需人工补命令。

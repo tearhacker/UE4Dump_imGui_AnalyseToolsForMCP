@@ -13,7 +13,16 @@ namespace UmtMcp
 // ---------------------------------------------------------------- 协议
 constexpr int kProtocolVersion = 1;
 constexpr uint16_t kDefaultPort = 35515;
-constexpr const char *kBindAddress = "127.0.0.1";  // 绝不 0.0.0.0
+
+// 默认监听地址 —— 🔴 安全红线：只监听回环，默认绝不 0.0.0.0。
+// 运行期可被 kBindConfigPath 指向的配置文件覆盖。
+constexpr const char *kBindAddress = "127.0.0.1";
+
+// 🔴 可选的运行期监听地址覆盖文件。
+// 文件内容一行，即 bind 地址（如 192.168.1.23 或 0.0.0.0）。
+// 文件不存在 / 为空 / 非法 → 保持 kBindAddress（127.0.0.1），安全红线不放松。
+// 放开到非回环 = 把 root 级内存读写接口暴露到网络，只在可信网络下用。
+constexpr const char *kBindConfigPath = "/sdcard/UnrealMemoryTools/mcp_bind.conf";
 
 // ---------------------------------------------------------------- 心跳与超时（协议 §8.1）
 constexpr int kHeartbeatIntervalSec = 2;   // 设备端心跳间隔
