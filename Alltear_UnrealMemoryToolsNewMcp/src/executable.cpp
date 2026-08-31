@@ -2748,6 +2748,24 @@ namespace
                 std::string worldSource = "PROBE_OVERRIDE";
                 if (!gWorldSlot)
                 {
+                    // Verified Shikigami UE4.27 build hint; validate slot/object below.
+                    const bool shikigami = gSelectedIndex >= 0 &&
+                        gSelectedIndex < static_cast<int>(gCandidates.size()) &&
+                        gCandidates[gSelectedIndex].package == "com.huitgames.shikigami.summons";
+                    if (shikigami && elf.isValid())
+                    {
+                        constexpr uintptr_t kShikigamiGWorldOffset = 0xBCA0910;
+                        const uintptr_t hintedSlot = elf.base() + kShikigamiGWorldOffset;
+                        if (UmtMcp::Analysis::IsReadableAddress(snapshot, hintedSlot, sizeof(uintptr_t)))
+                        {
+                            gWorldSlot = hintedSlot;
+                            worldSource = "SHIKIGAMI_UE427_HINT";
+                            evidence.push_back("GWorld slot from verified Shikigami UE4.27 relative offset");
+                        }
+                    }
+                }
+                if (!gWorldSlot)
+                {
                     gWorldSlot = findSymbolAny({"GWorld"});
                     worldSource = "ELF_SYMBOL";
                 }

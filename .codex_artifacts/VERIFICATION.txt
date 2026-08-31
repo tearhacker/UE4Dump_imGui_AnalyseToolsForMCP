@@ -6,4 +6,5 @@ MODIFIED RESULT: 61 passed in 5.60s; exit 0.
 ROLLBACK: .codex_artifacts\ROLLBACK.sh
 ROLLBACK RESULT: copy restored to baseline hash in script fixture; exit 0.
 RESTORED BEHAVIOR: rollback fixture restores original SHA256 while working tree remains modified.
+CURRENT C++ CHANGE: AutoFixProfile uses validated Shikigami UE4.27 relative hints for FNamePool/GUObjectArray; locateEngineGlobals adds guarded GWorld hint with structural fallback.
 ARTIFACTS: MODIFIED_FILE, DIFF_FILE, VERIFICATION.txt, ROLLBACK.sh

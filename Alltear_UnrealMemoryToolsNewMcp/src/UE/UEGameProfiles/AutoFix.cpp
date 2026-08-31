@@ -221,6 +221,14 @@ UE_Offsets *AutoFixProfile::GetOffsets() const
 
 namespace
 {
+    constexpr uintptr_t kShikigamiNamesOffset = 0xBAE55C0;
+    constexpr uintptr_t kShikigamiObjectsOffset = 0xBB29898;
+
+    bool IsShikigami(const std::string &package)
+    {
+        return package == "com.huitgames.shikigami.summons";
+    }
+
     static std::string ReadEntryString(uint8_t *entry, const UE_Offsets *off, bool useFNamePool)
     {
         if (!entry) return "";
@@ -289,6 +297,16 @@ namespace
 
 uintptr_t AutoFixProfile::GetGUObjectArrayPtr() const
 {
+    if (IsShikigami(_packageHint))
+    {
+        auto elf = GetUnrealELF();
+        const uintptr_t candidate = elf.isValid() ? elf.base() + kShikigamiObjectsOffset : 0;
+        if (candidate && kPtrValidator.isPtrReadable(candidate))
+        {
+            LOGI("[AutoFix] Shikigami UE4.27 GUObjectArray hint: +0x%lX", (unsigned long)kShikigamiObjectsOffset);
+            return candidate;
+        }
+    }
     return IGameProfile::GetGUObjectArrayPtr();
 }
 
@@ -370,5 +388,16 @@ uintptr_t AutoFixProfile::GetPhysx() const
 
 uintptr_t AutoFixProfile::GetNamesPtr() const
 {
+    if (IsShikigami(_packageHint))
+    {
+        auto elf = GetUnrealELF();
+        const uintptr_t candidate = elf.isValid() ? elf.base() + kShikigamiNamesOffset : 0;
+        if (candidate && VerifyNamesAtCandidate(candidate, GetOffsets(), true))
+        {
+            LOGI("[AutoFix] Shikigami UE4.27 FNamePool hint validated: +0x%lX", (unsigned long)kShikigamiNamesOffset);
+            return candidate;
+        }
+        LOGW("[AutoFix] Shikigami FNamePool hint failed validation; falling back to structural scan");
+    }
     return IGameProfile::GetNamesPtr();
 }
