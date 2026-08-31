@@ -1,12 +1,13 @@
 [project]
 name = "umt-mcp"
-version = "0.0.1"
-description = "PC-side MCP server for Alltear UMT (Android UE memory dumper). Blank scaffold."
+version = "0.1.0"
+description = "PC-side MCP server for Alltear UMT (Android UE memory dumper)."
 requires-python = ">=3.10"
 dependencies = [
-    # Pin v1.x: v2 renamed FastMCP → MCPServer and changed other APIs.
-    # See https://py.sdk.modelcontextprotocol.io/v2/migration/
     "mcp>=1.0,<2",
+    "capstone>=5.0,<6",
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
 ]
 
 [project.scripts]
@@ -16,5 +17,11 @@ umt-mcp = "server:main"
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-py-modules = ["server"]
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+asyncio_mode = "auto"

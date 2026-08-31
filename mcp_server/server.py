@@ -25,6 +25,8 @@ import sys
 from mcp.server.fastmcp import FastMCP
 
 from src.umt_mcp import config, tools
+from src.umt_mcp import instructions as ins_mod
+from src.umt_mcp import resources as res_mod
 
 logging.basicConfig(
     level=logging.INFO,
@@ -33,15 +35,19 @@ logging.basicConfig(
 )
 logger = logging.getLogger("umt-mcp")
 
-mcp = FastMCP(config.SERVER_NAME)
+mcp = FastMCP(
+    config.SERVER_NAME,
+    instructions=ins_mod.get_instructions(),
+)
 
 # 工具名对 AI 是 camelCase（协议 §6），Python 函数名是 snake_case
 for _fn in tools.TOOLS:
     mcp.add_tool(_fn, name=tools.to_camel_case(_fn.__name__))
 
 
+# ---------------------------------------------------------------- 资源路由（架构 §2.9）
 @mcp.resource("umt://protocol")
-def protocol_notes() -> str:
+def resource_protocol() -> str:
     """设备端协议要点速查 —— 排障时先读这个。"""
     return (
         "UMT 设备端 wire protocol 要点\n"
@@ -70,6 +76,24 @@ def protocol_notes() -> str:
         "· Array/Set/Map 字段只回摘要，不展开元素\n"
         "· SCAN_GNAMES / SCAN_OBJECTS 是分钟级，优先用 sample_* 抽样\n"
     )
+
+
+@mcp.resource("umt://capabilities")
+def resource_capabilities() -> str:
+    """当前设备端能力清单。"""
+    return res_mod.get_capabilities_summary()
+
+
+@mcp.resource("umt://config")
+def resource_config() -> str:
+    """PC 侧配置摘要（不含 token）。"""
+    return res_mod.get_config_summary()
+
+
+@mcp.resource("umt://process")
+def resource_process() -> str:
+    """当前目标进程信息（从 bridge 状态派生）。"""
+    return res_mod.get_process_info()
 
 
 def main() -> None:
