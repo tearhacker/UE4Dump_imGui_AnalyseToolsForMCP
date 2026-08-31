@@ -9,9 +9,6 @@
 运行前置条件：
     1. 手机已 adb 连接，且 UMT 正在运行
     2. 已执行端口转发：adb forward tcp:35515 tcp:35515
-    3. 已设置 token 环境变量：
-           export UMT_TOKEN=<UMT logcat 里的一次性 token>
-       token 是设备端每次启动随机生成的，重启 UMT 后必须换新的。
 
 启动：
     python server.py
@@ -55,7 +52,7 @@ def resource_protocol() -> str:
         "================================\n"
         f"传输: TCP 127.0.0.1:{config.DEFAULT_PORT}（设备端是服务端，仅经 adb forward 暴露）\n"
         f"帧格式: NDJSON，每行一个 JSON 对象，\\n 结尾，单帧上限 {config.MAX_FRAME_SIZE} 字节\n"
-        "握手: 设备端先发 HELLO(不含 token) → PC 发 AUTH → 设备端回 auth_ok\n"
+        "握手: 设备端先发 HELLO → PC 校验协议版本 → 直接发送命令（无需认证）\n"
         f"心跳: 设备端每 {config.HEARTBEAT_INTERVAL}s 一帧；"
         f"PC 侧超过 {config.HEARTBEAT_TIMEOUT}s 无心跳即判定进程假死并断开重连\n"
         f"命令硬超时: {config.CMD_TIMEOUT}s（设备端侧）\n"
@@ -64,8 +61,8 @@ def resource_protocol() -> str:
         "\n"
         "错误分层（协议 §5）\n"
         "-----------------\n"
-        "协议层(E_BAD_JSON/E_UNKNOWN_CMD/E_BAD_ARGS/E_PROTOCOL_MISMATCH/E_BAD_TOKEN)\n"
-        "    → 说明「我调错了」，通常改调用方式或取新 token\n"
+        "协议层(E_BAD_JSON/E_UNKNOWN_CMD/E_BAD_ARGS/E_PROTOCOL_MISMATCH)\n"
+        "    → 说明「我调错了」，通常需要修改调用方式或升级其中一端\n"
         "执行层(E_READ_FAILED/E_PROBE_FAILED/E_NOT_READY/E_TIMEOUT/E_PTRACE_FAILED…)\n"
         "    → 说明「设备端失败了」，需要排障或换策略\n"
         "\n"

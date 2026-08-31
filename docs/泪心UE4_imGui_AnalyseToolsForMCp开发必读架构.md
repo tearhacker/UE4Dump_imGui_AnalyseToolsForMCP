@@ -41,7 +41,7 @@
 | **1** | **单次响应无 token 上限**：`readMemory size≤65536` = hex 13 万字符 ≈ **33K token 一次响应**，可直接打爆上下文；`getLogs maxLines=200`≈6K；`scanCandidates maxCandidates=200`≈10K | 🔴 灾难 | **硬约束：单工具响应 ≤ 4K token**。`readMemory` size 上限砍到 4096；`getLogs` 默认 50；`maxCandidates` 默认 50；大响应一律分页 |
 | **2** | **慢工具无防护**：全内存扫描在 45.8 万对象游戏上分钟级，AI 只见调用挂起 → **重试风暴**（重扫 = 又几分钟，还翻倍占 worker） | 🔴 灾难 | ① 工具描述必须写**预期耗时档位**（快<1s / 中<30s / 慢<5min）；② 轮询响应带 `progress + etaSeconds + suggestedWaitMs`，AI 按建议等待；③ **长轮询**：`waitMs` 内未完成时设备端可 hold 连接至完成或上限，把 N 次空轮询压成 1 次 |
 | **3** | **AI 判定无证据内嵌**：scan 返回地址列表 → AI 挑一个 → 再调 sample → 三轮往返，且 AI 可能跳过采样直接"猜"最像的 | 🔴 幻觉高危 | `scanGNames`/`scanObjects` 返回**每个候选内嵌前 3 个名字样本** + `engineNameHits` 评分。扫描-采样-判定**三轮压一轮**，且证据强制在场，AI 想跳过都跳不过 |
-| **4** | **socket 未规定 bind 地址**：root 权限 + 无认证 + 内存写接口，若 bind 0.0.0.0 = **局域网任意设备可读写目标游戏内存** | 🔴 安全漏洞 | **强制 bind 127.0.0.1**，仅经 adb forward 暴露；PC 侧连 `127.0.0.1:35515`。HELLO 握手外加随机 token 校验（首次连接由 UMT 界面显示，PC 侧配置填入） |
+| **4** | **socket 未规定 bind 地址**：root 权限 + 无认证 + 内存写接口，若 bind 0.0.0.0 = **局域网任意设备可读写目标游戏内存** | 🔴 安全漏洞 | **强制 bind 127.0.0.1**，仅经 adb forward 暴露；PC 侧连 `127.0.0.1:35515`，HELLO 后无需认证可直接调用 |
 | **5** | **断线重连协议缺失**：USB 拔插 / adb 掉线 / UMT 被杀是**最高频故障**，架构只处理了设备进程崩溃（ESRCH） | 🔴 严重 | PC 侧 bridge：指数退避重连（1s/2s/4s/…上限 30s）；重连成功必**重新 HELLO**；**所有 sessionId 立即失效**；in-flight 调用返回 `isError: true` + `"连接已断开，已自动重连，请重试"` |
 | 6 | **outputSchema 的 token 成本漏算**：§1.7 只算 description（10K），每个 outputSchema 200–500 token × 42 = **另加 8–20K**，真实常驻 25–35K | 🟠 成本 | ① 描述瘦身：`<important_notes>` ≤5 条、总 ≤150 token；② **分组按需挂载**：核心 20 个常驻，F 组（ptrace）/E 组靠 `tools.listChanged` 动态加载；③ 上限 45 不变但**常驻 ≤25** |
 | 7 | **PC 并发与串行协议矛盾**：MCP 允许并行 tool calls，但设备协议是"发一收一"，架构只说 RLock 串行化——并行调用会排队且无请求匹配 | 🟠 延迟 | 明写：**协议为严格请求-响应串行**，PC 侧 RLock 必须；并行 tool calls 串行执行（正确但延迟叠加）。若将来要并行，协议加 `reqId` 匹配——v1 不做 |
@@ -289,8 +289,7 @@ PC 侧与设备端是两个二进制，**换版后静默不兼容是真实风险
 
 - **设备端 `CommandServer` 强制 `bind("127.0.0.1", 35515)`**，绝不监听 `0.0.0.0` / `INADDR_ANY`
 - 仅经 `adb forward tcp:35515 tcp:35515` 暴露；PC 侧 `ToolDispatcher` 连 `127.0.0.1:35515`
-- `HELLO` 握手**外加随机 token 校验**：首次连接由 UMT 界面显示一次性 token，PC 侧配置填入；
-  token 不符直接 `close()`
+- `HELLO` 握手后直接调用：客户端只校验 `protocol`，不发送 Token 或 AUTH 帧
 - 端口号从 `35515` 提为可配置（避免与已运行实例冲突），但默认仍仅本地
 
 ### ❗修正 6：断线重连协议（**v1.2，issue #5**）
@@ -298,7 +297,7 @@ PC 侧与设备端是两个二进制，**换版后静默不兼容是真实风险
 > USB 拔插 / adb 掉线 / UMT 被杀是**最高频故障**，v1.1 只处理了设备进程崩溃（ESRCH）。
 
 - PC 侧 `ToolDispatcher` 维护连接，断线后**指数退避重连**（1s / 2s / 4s / … 上限 30s）
-- 重连成功**必重新 `HELLO`**（含 token 校验与 `protocol` 校验）
+- 重连成功**必重新 `HELLO`**并校验 `protocol`
 - 重连后**所有 `sessionId` 立即失效**（扫描候选集、类索引、job 全部作废），AI 须重建
 - 重连期间 in-flight 调用返回 `isError: true` + `"连接已断开，已自动重连，请重试"`
 - 设备端被杀重启后，旧会话数据不恢复——这是预期行为，文档写明
@@ -715,7 +714,7 @@ async def start_probe(wait_ms: int = Field(default=5000, ge=0, le=60000)) -> dic
 > 两类命令以 `DumpUiState` mutex 保护的数据为界，避免竞态。
 >
 > 🔴 **安全（v1.2，issue #4）**：命令服务 `bind("127.0.0.1")`，详见 §2.1 修正 5。
-> 绝不监听 `0.0.0.0`；HELLO 含随机 token 校验。
+> 绝不监听 `0.0.0.0`；HELLO 后无需认证可直接调用。
 | 命令队列与分发 | mutex + condition_variable + 分发表 | 250 |
 | 符号定位 | 按版本试 4 个引擎原生符号 + 解引用回减 | 150 |
 | **多锚点改造** | 改 `GetNamesPtr()`，用上 §2.3 那份名单 | 80 |

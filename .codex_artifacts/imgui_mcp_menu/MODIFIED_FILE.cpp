@@ -3334,10 +3334,9 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
         ImGui::Text("127.0.0.1:%d", static_cast<int>(UmtMcp::kDefaultPort));
 
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
-        ImGui::TextDisabled("%s", Tr("连接方式", "Connection"));
-        ImGui::TextColored(ImVec4(0.36f, 0.92f, 0.45f, 1.0f), "%s",
-                           Tr("无需 Token，客户端配置完成后可直接调用",
-                              "No token required; configured clients can call directly"));
+        ImGui::TextDisabled("%s", Tr("MCP Token（填到 PC 侧配置）", "MCP Token (for PC config)"));
+        ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.36f, 1.0f), "%s",
+                           UmtMcp::CommandServer::Token().c_str());
         ImGui::EndChild();
     }
     else if (navPage == NavExplorer)
@@ -3535,7 +3534,8 @@ int main()
 
         if (UmtMcp::CommandServer::Start(UmtMcp::kDefaultPort, &mcpQueue, kUEDUMPER_VERSION))
         {
-            LOGI("[MCP] 命令服务已就绪，客户端无需 Token 可直接连接");
+            // 一次性 token：用户需填到 PC 侧配置（后续应在 UI 面板显示）
+            LOGI("[MCP] 命令服务已就绪，一次性 token = %s", UmtMcp::CommandServer::Token().c_str());
         }
         else
         {

@@ -1,0 +1,124 @@
+CHANGED_BRANCH_FIELD
+Git branch: main
+Fields: CommandServer direct post-HELLO command dispatch; Python bridge direct post-HELLO requests; removal of AUTH/auth_ok/auth_fail/E_BAD_TOKEN; token-free MCP client configuration and UI copy.
+
+ARTIFACT_PATHS
+MODIFIED_FILE: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\remove_mcp_token\MODIFIED_FILE.cpp
+DIFF_FILE: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\remove_mcp_token\TOKEN_AUTH_REMOVAL.diff
+VERIFICATION: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\remove_mcp_token\VERIFICATION.txt
+ROLLBACK: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\remove_mcp_token\ROLLBACK.sh
+
+ORIGINAL_SHA256
+EF25E06609CECF678D85A9D89BBEA8770354204FC771C8AE7B21F8A917FE5A59  Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp
+27DF5422C796CFD743C7A4D0140DF74DB21CB9DD08E53A0F0380DB12B6E23ABB  Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.cpp
+3529DB8CE4B2206DE98BD5CA04F30EF505FE25A60B9A05839D6325C82B6D9DF1  Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.hpp
+D8DB928462BEF5BC3228B17413EB69A3E0FD4944FF8EEB3951F64FDA588231A1  Alltear_UnrealMemoryToolsNewMcp/src/mcp/Protocol.hpp
+6B7DD047F6FA3BD7BA3E40E4FE7061BC63853867BA85EAF9A0C1BCF36D369C8A  mcp_server/src/umt_mcp/bridge.py
+6B03BDB5FF22005D35B3F407695DA5BA8BE5459A5EE4E0BB0A2D79D156D90508  mcp_server/src/umt_mcp/protocol.py
+5F4FE7AEF53484413878EA88A18B0B09D523D6C4C3AAD16CFA0CAE0B58DDD502  mcp_server/tests/test_bridge.py
+0C37FA9E1BBB791A7970B6B456FA1166CAE28FFA4B0C22F56299D93FBE2457C4  mcp_server/server.py
+9AE1D8B9B0BA4AA9AE08A8AE81DE8BC79EDE7875535797F06600CA27D2FC2448  mcp_server/README.md
+9B4F43ADFE731A343BE3E9CA08EB8AED00C438B9E688C7F4B7CDCCE192F6B766  mcp_server/客户端AI工具配置MCP文件.json
+EF77931CDC33E37FB7B3ED764DC56C23A7BC099EEBC34FD86FAE92F952CC0EEB  overview.md
+82B6C43BCCBE3B29B25980653C272DB6455D29A219FD1A7B316C63EB99F531B7  docs/mcp-protocol.md
+B7782FCED4C1DCBC55A05DA77FEC33A308388F82CC49ECB06450CDE9B1384D3A  docs/MCP可用工具文档.md
+873C9C0E6F5FAA6777E901C2CFA33ECE6C41DA642CFD04493C8D200F4F5B7D3C  docs/mcp_server开发步骤.md
+C4C8629C8B8AB0F8857F99CA45B4AB293E7AF444C854E8D46D5790EAD63F6897  docs/设备端命令服务设计.md
+CC5F5DF0DE4852452266119ECCA222D1CE504D5E3718D5B892722FCA36222A27  docs/MCP开发路线图.md
+D183BEEADE4DAD968FF5A4A7CE9C8DE2E5520AF8EDFC5F809743A34F6BE24E50  docs/泪心UE4_imGui_AnalyseToolsForMCp开发必读架构.md
+
+MODIFIED_SHA256
+3B90DCD2B4391DBF291CD2EA1693AA075E942385576A69A85A89084D547ED6BF  Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp
+3CC1D81E8A5BBB7BDCD80116B50B33C1A0202E7F3570306809E6341C991909A5  Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.cpp
+E06F76262D08557EAC434FC6FE90DFE62426BC16A60211D90781ADB8037E6C36  Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.hpp
+186E4BCD36A8A20B9C84126B3F2B9F1917DDD9CAB649E3FC669DF0EFB9689F88  Alltear_UnrealMemoryToolsNewMcp/src/mcp/Protocol.hpp
+0F900AA36C6F9358619A40B1829EA647046434B0A4785F26454FAB46D4EEF91B  mcp_server/src/umt_mcp/bridge.py
+32D0C24919386B5863A279BDEBBD1CD395C73667B2E9FD6808FF9705E60C818A  mcp_server/src/umt_mcp/protocol.py
+59CE8474A1139B8B325F08F37657C9235CD8D11731E52355FAB831CEFFEED588  mcp_server/tests/test_bridge.py
+16018A513C7E50EB3A7D216664992550C5E5600D5614D1A31EECB8049DF3AA02  mcp_server/server.py
+4A2530AE92BD9B3996E085094980920C732C1B0B644B21B6A300A7B17677966B  mcp_server/README.md
+E86A2AE27179C70D58FBB8D8C16586D35739CA7DC4C39BD7ECDA0C189E054627  mcp_server/客户端AI工具配置MCP文件.json
+
+BASELINE_CPP
+COMMAND: & 'D:\ProgramerDevelop\VS2026\SDK\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe' --build build --target UnrealMemoryTools -j4
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\Alltear_UnrealMemoryToolsNewMcp
+INPUT: Pre-change device server source with random token generation and AUTH-before-command enforcement.
+LITERAL_OUTPUT:
+[1/1] Linking CXX executable D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\Alltear_UnrealMemoryToolsNewMcp\outputs\arm64-v8a\UnrealMemoryTools
+EXIT_STATUS: 0
+RESULT: Baseline Android arm64-v8a target linked successfully.
+
+BASELINE_PYTHON
+COMMAND: & '.venv\Scripts\python.exe' -m pytest tests -q
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server
+INPUT: Pre-change Python bridge and tests; authenticated socket tests remained skipped.
+LITERAL_OUTPUT:
+ssssssssssss......ss......................                               [100%]
+28 passed, 14 skipped in 0.48s
+EXIT_STATUS: 0
+RESULT: Baseline Python suite passed with 14 authenticated transport tests skipped.
+
+MODIFIED_CPP
+COMMAND: & 'D:\ProgramerDevelop\VS2026\SDK\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe' --build build --target UnrealMemoryTools -j4
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\Alltear_UnrealMemoryToolsNewMcp
+INPUT: Modified token-free device server source.
+LITERAL_OUTPUT:
+[1/5] Building CXX object CMakeFiles/UnrealMemoryTools.dir/src/mcp/PtraceSession.cpp.o
+[2/5] Building CXX object CMakeFiles/UnrealMemoryTools.dir/src/mcp/CommandDispatcher.cpp.o
+[3/5] Building CXX object CMakeFiles/UnrealMemoryTools.dir/src/mcp/CommandServer.cpp.o
+[4/5] Building CXX object CMakeFiles/UnrealMemoryTools.dir/src/executable.cpp.o
+[5/5] Linking CXX executable D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\Alltear_UnrealMemoryToolsNewMcp\outputs\arm64-v8a\UnrealMemoryTools
+EXIT_STATUS: 0
+RESULT: Modified Android arm64-v8a executable compiled and linked successfully.
+
+MODIFIED_PYTHON
+COMMAND: & '.venv\Scripts\python.exe' -m pytest tests -q
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server
+INPUT: Modified token-free bridge; all socket transport tests enabled.
+LITERAL_OUTPUT:
+..........................................                               [100%]
+42 passed in 5.71s
+EXIT_STATUS: 0
+RESULT: Every Python test passed, including direct post-HELLO command transport and obsolete UMT_TOKEN handling.
+
+CONFIG_VALIDATION
+COMMAND: Parse 客户端AI工具配置MCP文件.json with ConvertFrom-Json and reject UMT_TOKEN or env fields.
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server
+INPUT: Modified complete MCP client configuration.
+LITERAL_OUTPUT:
+CONFIG_RESULT: valid
+COMMAND: C:/Program Files/Python310/python.exe
+PORT: 35515
+TOKEN_FIELD: absent
+EXIT_STATUS: 0
+RESULT: Configuration is valid JSON and contains no token setting; configured Python and ADB paths both exist.
+
+AUTH_SYMBOL_SCAN
+COMMAND: rg -n 'Token\(|GenerateToken|token_|authenticated|auth_required|auth_fail|auth_ok|TOKEN_ENV_VAR|MSG_AUTH|E_BAD_TOKEN' Alltear_UnrealMemoryToolsNewMcp/src/mcp Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp mcp_server/src mcp_server/server.py
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear
+INPUT: Modified runtime source paths.
+LITERAL_OUTPUT:
+AUTH_SYMBOL_SCAN: clean
+EXIT_STATUS: 0
+RESULT: No token/authentication runtime symbols remain in the device server or PC bridge.
+
+ROLLBACK
+COMMAND: & 'D:\ProgramerDevelop\Git\bin\bash.exe' '.codex_artifacts/remove_mcp_token/ROLLBACK.sh' 'D:/泪心安卓领域基本盘技术/ue4ImGuiAutoWorkingMcpBytear/.codex_artifacts/remove_mcp_token/rollback_test_workspace'
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear
+INPUT: A separate root containing fresh copies of all 17 modified files.
+LITERAL_OUTPUT:
+ROLLBACK_RESULT: restored
+RESTORED_EXECUTABLE_SHA256: EF25E06609CECF678D85A9D89BBEA8770354204FC771C8AE7B21F8A917FE5A59
+RESTORED_COMMAND_SERVER_SHA256: 27DF5422C796CFD743C7A4D0140DF74DB21CB9DD08E53A0F0380DB12B6E23ABB
+RESTORED_BRIDGE_SHA256: 6B7DD047F6FA3BD7BA3E40E4FE7061BC63853867BA85EAF9A0C1BCF36D369C8A
+RESTORED_TESTS_SHA256: 5F4FE7AEF53484413878EA88A18B0B09D523D6C4C3AAD16CFA0CAE0B58DDD502
+RESTORED_BEHAVIOR: random token generation and AUTH-before-command enforcement are restored; prior ImGui layout changes remain.
+ROLLBACK_EXIT_STATUS: 0
+EXIT_STATUS: 0
+RESULT: Reverse diff restored the original authentication behavior and byte hashes on a separate copy. The main workspace remains modified and token-free.
+
+CURRENT_MODIFIED_BEHAVIOR
+The device server sends HELLO and immediately accepts command frames without AUTH.
+The PC bridge no longer reads UMT_TOKEN and sends no auth frame.
+The MCP client JSON has no token/env entry; any correctly configured client can call through the bridge.
+The ImGui MCP page explicitly states that no Token is required.

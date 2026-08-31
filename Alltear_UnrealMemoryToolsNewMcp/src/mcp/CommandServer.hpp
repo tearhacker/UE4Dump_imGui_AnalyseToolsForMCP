@@ -23,14 +23,11 @@ namespace UmtMcp
 class CommandServer
 {
 public:
-    // 启动服务（非阻塞，内部起线程）。token 由本类随机生成，通过 Token() 取用。
+    // 启动服务（非阻塞，内部起线程）。连接建立后可直接执行命令。
     // buildVersion 会写进 HELLO 帧（应传 kUEDUMPER_VERSION）
     static bool Start(uint16_t port, CommandQueue *queue, const std::string &buildVersion = "1.0.0");
     static void Stop();
     static bool IsRunning();
-
-    // 一次性 token，需在 UMT 界面展示给用户（用户填到 PC 侧配置）
-    static std::string Token();
 
 private:
     static void ServerLoop();
@@ -40,8 +37,7 @@ private:
     static bool SendAll(int sock, const char *data, size_t len);
 
     // 处理单条已接收的帧（请求入队 → 等待响应 → 发送）
-    // authenticated 为**连接级**状态：未通过 auth 的客户端只能发 auth 帧
-    static bool HandleFrame(int sock, const std::string &line, bool &authenticated);
+    static bool HandleFrame(int sock, const std::string &line);
 
     // 心跳（等待响应期间也会被调用）
     static void MaybeSendHeartbeat(int sock, time_t &lastHeartbeat, bool busy);
@@ -49,7 +45,6 @@ private:
     static std::atomic<bool> running_;
     static std::atomic<bool> stopRequested_;
     static std::thread thread_;
-    static std::string token_;
     static std::string buildVersion_;
     static uint16_t port_;
     static CommandQueue *queue_;

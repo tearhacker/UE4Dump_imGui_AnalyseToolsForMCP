@@ -1,0 +1,60 @@
+CHANGED_BRANCH_FIELD
+Git branch: main
+Fields: NavPage::NavMcp; navPage == NavOverview topbar guard; ImGui SetNextWindowSize height 840.0f -> 960.0f; Settings contributor label.
+
+ARTIFACT_PATHS
+MODIFIED_FILE: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\imgui_mcp_menu\MODIFIED_FILE.cpp
+DIFF_FILE: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\imgui_mcp_menu\UI_LAYOUT.diff
+VERIFICATION: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\imgui_mcp_menu\VERIFICATION.txt
+ROLLBACK: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\imgui_mcp_menu\ROLLBACK.sh
+
+SOURCE_PATHS
+Primary UI source: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\Alltear_UnrealMemoryToolsNewMcp\src\executable.cpp
+Window host UI source: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\Alltear_UnrealMemoryToolsNewMcp\src\GUI\Android_draw\draw_Gui.cpp
+
+ORIGINAL_SHA256
+executable.cpp: 83A5C891D557EBB6F6C45D77BE8E25CF27506699A7815593952ACF93D47033B7
+draw_Gui.cpp: 7D5C7D43BDEE12C8641DD66D770DBC8CF29B0FF8B02533FD336E3741C46B7C58
+
+MODIFIED_SHA256
+executable.cpp: EF25E06609CECF678D85A9D89BBEA8770354204FC771C8AE7B21F8A917FE5A59
+draw_Gui.cpp: D8A6A6876505DF06876ED892A4DC89624403997172593BC1D6CD65620FFD5932
+
+BASELINE
+COMMAND: & 'D:\ProgramerDevelop\VS2026\SDK\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe' --build build --target UnrealMemoryTools -j4
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\Alltear_UnrealMemoryToolsNewMcp
+INPUT: Existing unmodified executable.cpp and draw_Gui.cpp at the ORIGINAL_SHA256 values above.
+LITERAL_OUTPUT:
+ninja: no work to do.
+EXIT_STATUS: 0
+RESULT: Baseline target was already built and current.
+
+MODIFIED
+COMMAND: & 'D:\ProgramerDevelop\VS2026\SDK\Common7\IDE\CommonExtensions\Microsoft\CMake\CMake\bin\cmake.exe' --build build --target UnrealMemoryTools -j4
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\Alltear_UnrealMemoryToolsNewMcp
+INPUT: Modified executable.cpp and draw_Gui.cpp at the MODIFIED_SHA256 values above.
+LITERAL_OUTPUT:
+[1/3] Building CXX object CMakeFiles/UnrealMemoryTools.dir/src/GUI/Android_draw/draw_Gui.cpp.o
+[2/3] Building CXX object CMakeFiles/UnrealMemoryTools.dir/src/executable.cpp.o
+[3/3] Linking CXX executable D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\Alltear_UnrealMemoryToolsNewMcp\outputs\arm64-v8a\UnrealMemoryTools
+EXIT_STATUS: 0
+RESULT: Modified Android arm64-v8a executable compiled and linked successfully.
+
+ROLLBACK
+COMMAND: & 'D:\ProgramerDevelop\Git\bin\bash.exe' '.codex_artifacts/imgui_mcp_menu/ROLLBACK.sh' 'D:/泪心安卓领域基本盘技术/ue4ImGuiAutoWorkingMcpBytear/.codex_artifacts/imgui_mcp_menu/rollback_test_workspace'
+WORKING_DIRECTORY: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear
+INPUT: A separate temporary root containing fresh copies of both modified source files.
+LITERAL_OUTPUT:
+ROLLBACK_RESULT: restored
+RESTORED_EXECUTABLE_SHA256: 83A5C891D557EBB6F6C45D77BE8E25CF27506699A7815593952ACF93D47033B7
+RESTORED_WINDOW_SHA256: 7D5C7D43BDEE12C8641DD66D770DBC8CF29B0FF8B02533FD336E3741C46B7C58
+RESTORED_BEHAVIOR: MCP returns to Quick Actions; topbar returns to every page; initial canvas height returns to 840; contributor line is removed.
+ROLLBACK_EXIT_STATUS: 0
+EXIT_STATUS: 0
+RESULT: Reverse diff restored both files byte-for-byte to their original SHA-256 values on a separate copy. The workspace source remains modified.
+
+CURRENT_MODIFIED_BEHAVIOR
+The left sidebar includes MCP and its page exclusively displays service status, listen address, and token.
+The Overview/Idle/ZH/EN/Exit topbar is created only while navPage == NavOverview.
+The initial canvas height is 960 instead of 840.
+Settings displays 贡献者: 泪心(tearhacker) / Contributor: 泪心(tearhacker) in deep red immediately after the author line.

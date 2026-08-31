@@ -40,7 +40,7 @@ mcp_server/
 ├── requirements.txt            ⬜ 锁版本：mcp / capstone / pytest
 ├── src/umt_mcp/                ⬜ 包（避免 import 路径坑）
 │   ├── __init__.py
-│   ├── config.py               端口 35515、token、超时、waitMs 默认值
+│   ├── config.py               端口 35515、超时、waitMs 默认值
 │   ├── protocol.py             设备端 wire protocol（帧/HELLO/错误码）
 │   ├── bridge.py               socket 客户端 + 重连 + RLock 串行
 │   ├── adb.py                  adb forward 管理
@@ -77,13 +77,13 @@ mcp_server/
 - **验收**：`python -c "import umt_mcp"` 通过；`pip install -r requirements.txt` 可复现
 
 ### Step 2　协议契约层 `protocol.py`（**Phase 0 核心**）
-- **产出**：✅ 协议文档 **`docs/mcp-protocol.md` 已定稿**（NDJSON 帧、HELLO+token、
+- **产出**：✅ 协议文档 **`docs/mcp-protocol.md` 已定稿**（NDJSON 帧、HELLO、
   请求/响应、长任务与长轮询、错误码表、43 命令表、命令分级、契约样例）
 - **待做**：`src/umt_mcp/protocol.py` —— 按协议实现编解码（帧读写、HELLO 校验、错误码枚举、命令表常量）
 - **验收**：`tests/contract/` 黄金样例可被 PC 侧与设备端测试共同引用；`test_protocol.py` 全过
 
 ### Step 3　设备桥接层 `bridge.py`
-- **产出**：socket 客户端（连 `127.0.0.1:35515`）+ HELLO+token 校验 + **指数退避重连（1/2/4…≤30s）** + `RLock` 串行化 + `asyncio.to_thread` 包装阻塞 I/O
+- **产出**：socket 客户端（连 `127.0.0.1:35515`）+ HELLO 协议校验 + **指数退避重连（1/2/4…≤30s）** + `RLock` 串行化 + `asyncio.to_thread` 包装阻塞 I/O
 - **🔴 心跳判活（防卡死必需）**：后台收心跳帧（协议 §3.8，设备端每 2s 一帧）；
   **超过 10s 无心跳判定设备端假死** → 断开重连。这让 PC 侧能区分「**在算**」（心跳正常 busy=true）与「**死了**」（无心跳）
 - **软超时**：单命令等待超过 `SOCKET_TIMEOUT`（60s）也要能中断等待并探活，不能无限阻塞
@@ -164,7 +164,7 @@ mcp_server/
 ### 设备端最小闭环（架构 §5.6.3，协议见 `docs/mcp-protocol.md`）
 
 ```
-src/mcp/CommandServer.{hpp,cpp}     socket 监听 + HELLO + token + NDJSON 收发   ~400 行
+src/mcp/CommandServer.{hpp,cpp}     socket 监听 + HELLO + NDJSON 收发           ~400 行
 src/mcp/CommandQueue.{hpp,cpp}      mutex + condition_variable + 队列           ~250 行
 src/mcp/CommandDispatcher.{hpp,cpp} 命令名 → 实现映射                            ~100 行
 3 个 [MVP] 命令                      PING / LIST_PROCESSES / GET_LOGS            ~100 行
@@ -179,7 +179,7 @@ executable.cpp 接线                  起线程 + 每帧 poll                  
 1. 🔴 **bind `127.0.0.1`，绝不 `0.0.0.0`** —— root + 无认证 + 内存写接口，局域网暴露 = 任意设备可读写游戏内存
 2. 🔴 **命令分级**（协议 §7）—— 快命令直执行，重活投 `gWorkerThread`。否则分钟级扫描期间
    `PING`/`GET_LOGS` 全排队，AI 误判掉线触发重试风暴
-3. 🔴 **HELLO + 随机 token** —— 界面显示一次性 token，PC 侧配置填入，不符直接 `close()`
+3. **HELLO 后直接调用** —— 客户端只需校验协议版本，无需额外认证帧
 
 ### 推进策略（串行，单人开发并行无收益）
 

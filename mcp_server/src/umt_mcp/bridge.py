@@ -25,7 +25,6 @@ from __future__ import annotations
 import itertools
 import json
 import logging
-import os
 import queue
 import socket
 import threading
@@ -37,10 +36,6 @@ from . import config, protocol as proto
 
 logger = logging.getLogger(__name__)
 
-# token 只从环境变量取 —— 它是设备端一次性生成的密钥，不进代码、不进仓库
-TOKEN_ENV_VAR = "UMT_TOKEN"
-
-
 class UmtBridge:
     """设备端命令通道。线程安全，可跨 MCP tool call 复用。"""
 
@@ -48,11 +43,9 @@ class UmtBridge:
         self,
         host: str = config.HOST,
         port: int = config.DEFAULT_PORT,
-        token: str | None = None,
     ) -> None:
         self._host = host
         self._port = port
-        self._token = token if token is not None else os.environ.get(TOKEN_ENV_VAR, "")
 
         self._sock: socket.socket | None = None
         self._reader: threading.Thread | None = None
@@ -107,8 +100,8 @@ class UmtBridge:
         return logs
 
     # ------------------------------------------------------------ 连接
-    def connect(self, max_attempts: int = 1) -> None:
-        """建立连接并完成 HELLO + AUTH 握手。失败按指数退避重试。
+    def connect(self, max_attempts: int | None = 1) -> None:
+        """建立连接并校验 HELLO 协议版本。失败按指数退避重试。
 
         max_attempts=1 表示只试一次（默认，让工具快速失败而不是挂住）。
         """
@@ -123,9 +116,10 @@ class UmtBridge:
                 last_exc = exc
                 self._teardown()
 
-                limit = config.RECONNECT_MAX_ATTEMPTS
-                if max_attempts > 1:
-                    limit = max_attempts
+                if isinstance(exc, proto.UmtProtocolError) and exc.code in proto.NON_RETRYABLE:
+                    raise
+
+                limit = config.RECONNECT_MAX_ATTEMPTS if max_attempts is None else max_attempts
                 if limit and attempt >= limit:
                     break
 
@@ -181,28 +175,6 @@ class UmtBridge:
         self._capabilities = list(hello.get("capabilities", []))
         logger.info("设备端已连接：build=%s，%d 条命令", self._build, len(self._capabilities))
 
-        # ---- AUTH（PC → 设备端，首个命令之前必发）
-        if not self._token:
-            self._teardown()
-            raise proto.UmtProtocolError(
-                proto.E_BAD_TOKEN,
-                f"未设置 token。请从 UMT 的 logcat 里取一次性 token，"
-                f"设置环境变量 {TOKEN_ENV_VAR} 后重启本服务。",
-            )
-
-        self._handshake_event.clear()
-        self._send_unlocked({"type": proto.MSG_AUTH, "protocol": config.PROTOCOL_VERSION,
-                             "token": self._token})
-
-        result = self._await_handshake(timeout=5.0)
-        if result.get("type") != proto.MSG_AUTH_OK:
-            err = result.get("error") or {}
-            self._teardown()
-            raise proto.UmtProtocolError(
-                err.get("code", proto.E_BAD_TOKEN),
-                err.get("msg", "token 校验失败") + " —— 请从 UMT 界面/日志取新 token",
-            )
-
     def _await_handshake(self, timeout: float) -> dict:
         if not self._handshake_event.wait(timeout):
             self._teardown()
@@ -251,7 +223,7 @@ class UmtBridge:
     def _dispatch(self, frame: dict) -> None:
         ftype = frame.get("type")
 
-        if ftype in (proto.MSG_HELLO, proto.MSG_AUTH_OK, proto.MSG_AUTH_FAIL):
+        if ftype == proto.MSG_HELLO:
             self._handshake = frame
             self._handshake_event.set()
             return

@@ -31,15 +31,13 @@
    ↓
 PC 侧 connect
    ↓
-设备端主动发 HELLO（仅协议/构建/能力，🔴 不含 token）
+设备端主动发 HELLO（协议/构建/能力）
    ↓
-PC 侧发 AUTH 帧（携带一次性 token）
+PC 侧校验 protocol   ──不匹配──> 明确报错并 close()
+   ↓ 通过
+直接请求-响应（无需认证，严格串行，一问一答）
    ↓
-设备端校验 protocol + token   ──不符/不匹配──> 回 auth_fail 并 close()
-   ↓ 通过（回 auth_ok）
-正常请求-响应（严格串行，一问一答，🔴 未 AUTH 前任何命令返回 auth_required 并断开）
-   ↓
-断开 → PC 侧指数退避重连（1/2/4…≤30s）→ 重连后必重新 HELLO + AUTH
+断开 → PC 侧指数退避重连（1/2/4…≤30s）→ 重连后重新校验 HELLO
 ```
 
 🔴 **重连后所有 `sessionId` 立即失效**（扫描候选集、类索引、job 全部作废，架构 v1.2 issue #5）。
@@ -48,46 +46,19 @@ PC 侧发 AUTH 帧（携带一次性 token）
 
 ## 3. 消息格式
 
-### 3.1 HELLO（设备端 → PC，连接建立后立即发，🔴 不含 token）
+### 3.1 HELLO（设备端 → PC，连接建立后立即发送）
 
 ```json
 {"type":"hello","protocol":1,"build":"1.0.0","capabilities":["PING","LIST_PROCESSES","GET_LOGS"]}
 ```
 
-> 🔴 **HELLO 不携带 token**：token 是一次性共享密钥，只在 `AUTH` 帧由 PC 侧提交、设备端校验。
-> 若 HELLO 把 token 广播出去，任何本地客户端连上即免费拿到密钥，鉴权形同虚设。
-> token 由设备端 `GenerateToken()` 在 `Start()` 时生成，用户从 UMT 界面/日志取得后填入 PC 侧配置。
+> 设备端不要求 Token，也不存在 AUTH 帧。PC 侧确认 `protocol` 一致后可直接发送请求。
 
 | 字段 | 含义 |
 |---|---|
 | `protocol` | 协议版本，当前 `1`。**不匹配 PC 侧必须明确报错并断开**，不让后续命令一路失败 |
 | `build` | UMT 构建版本，供 `getCapabilities` 暴露与排障 |
 | `capabilities` | 设备端当前支持的命令列表（ptrace 不可用时不含 F 组命令） |
-
-### 3.1.1 AUTH（PC → 设备端，HELLO 之后、首个命令之前必发）
-
-```json
-{"type":"auth","protocol":1,"token":"a3f9c2e1"}
-```
-
-| 字段 | 含义 |
-|---|---|
-| `protocol` | 协议版本，**必须与 HELLO 一致**，否则设备端回 `E_PROTOCOL_MISMATCH` 并断开 |
-| `token` | 用户从 UMT 界面/日志取得的一次性随机 token，PC 侧配置填入 |
-
-设备端校验通过 → 回 `auth_ok`：
-
-```json
-{"type":"auth_ok","protocol":1}
-```
-
-校验失败（token 不符 / 协议不匹配）→ 回 `auth_fail` 并断开连接：
-
-```json
-{"type":"auth_fail","error":{"code":"E_BAD_TOKEN","msg":"token 不匹配"}}
-```
-
-🔴 **未 AUTH 前**：设备端对任何非 `auth` 帧一律回 `auth_required` + `E_BAD_TOKEN` 并断开（安全红线，见 `CommandServer.cpp`）。
 
 ### 3.2 请求（PC → 设备端）
 
@@ -176,8 +147,7 @@ PC 侧发 AUTH 帧（携带一次性 token）
 
 | 错误码 | 含义 | PC 侧行为 |
 |---|---|---|
-| `E_PROTOCOL_MISMATCH` | HELLO / AUTH 的 protocol 不匹配 | 断开，明确报错，不重试 |
-| `E_BAD_TOKEN` | token 校验失败 | 断开，提示用户在 UMT 界面取新 token |
+| `E_PROTOCOL_MISMATCH` | HELLO 的 protocol 与 PC 侧不匹配 | 断开，明确报错，不重试 |
 | `E_BAD_JSON` | JSON 解析失败 | 协议错误 |
 | `E_UNKNOWN_CMD` | 未知命令名 | 协议错误 |
 | `E_BAD_ARGS` | 参数 schema 校验失败 | 协议错误 |
@@ -410,10 +380,6 @@ PC 侧发 AUTH 帧（携带一次性 token）
 // get_logs.response
 {"id":3,"ok":true,"data":{"lines":[{"index":0,"level":"E","timestamp":"","message":"[Bootstrap] 通用方式搜索 GUObject 失败"}],"totalLines":1}}
 
-// hello（🔴 不含 token）
+// hello（收到并确认 protocol 后即可直接发送上面的请求）
 {"type":"hello","protocol":1,"build":"1.0.0","capabilities":["PING","LIST_PROCESSES","GET_LOGS"]}
-// auth.request（HELLO 之后、首个命令之前必发）
-{"type":"auth","protocol":1,"token":"a3f9c2e1"}
-// auth.response（成功）
-{"type":"auth_ok","protocol":1}
 ```

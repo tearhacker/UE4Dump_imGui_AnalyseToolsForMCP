@@ -100,7 +100,7 @@ void drawBegin() {
 
 void Layout_tick_UI(bool *main_thread_flag) {
     { 
-        ImGui::SetNextWindowSize(ImVec2(1280.0f, 840.0f), ImGuiCond_FirstUseEver);
+        ImGui::SetNextWindowSize(ImVec2(1280.0f, 960.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImVec2(90.0f, 110.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowBgAlpha(0.92f);
         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 18.0f);

@@ -35,7 +35,6 @@ inline const int kSessionIdleTimeoutMs = 30000;
 namespace Err
 {
 inline const char *const kProtocolMismatch = "E_PROTOCOL_MISMATCH";
-inline const char *const kBadToken = "E_BAD_TOKEN";
 inline const char *const kBadJson = "E_BAD_JSON";
 inline const char *const kUnknownCmd = "E_UNKNOWN_CMD";
 inline const char *const kBadArgs = "E_BAD_ARGS";

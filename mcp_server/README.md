@@ -6,7 +6,7 @@ ptrace 远程调用。
 
 - 基于官方 Python MCP SDK（`mcp` 包，FastMCP），stdio 传输
 - 设备通信：TCP + NDJSON，`adb forward tcp:35515 tcp:35515` 隧道
-- 协议：HELLO → AUTH（一次性 token）→ 心跳 → 严格串行一问一答
+- 协议：HELLO → 直接命令调用（无需认证）→ 心跳 → 严格串行一问一答
 - 工具名对外为 **camelCase**（如 `readMemory`），设备端命令为 **UPPER_SNAKE**
   （如 `MEMORY_READ`），由 `tools.py` 自动映射，启动时 `self_check()` 校验
 
@@ -28,11 +28,8 @@ src/umt_mcp/protocol.py 帧常量、错误码、协议层/执行层错误分层
 
 1. 手机 adb 连接：`adb devices`
 2. 端口转发（设备端只监听回环）：`adb forward tcp:35515 tcp:35515`
-3. 取设备端一次性 token（UMT logcat 输出，每次启动随机生成）：
-   ```bash
-   export UMT_TOKEN=<logcat 中的 token>
-   ```
-   token 只从环境变量读取，不进代码、不进仓库；设备端重启后必须换新。
+
+设备端不要求 Token。PC 侧收到 `HELLO` 并确认协议版本一致后即可直接调用命令。
 
 ## Layout
 
@@ -189,7 +186,7 @@ mcp_server/
 
 | 层级 | 含义 | 处理 |
 |---|---|---|
-| 协议层（`E_BAD_TOKEN` / `E_PROTOCOL_MISMATCH` / `E_UNKNOWN_CMD` / `E_BAD_ARGS`） | 调用方式错误 | 改调用方式 / 取新 token |
+| 协议层（`E_PROTOCOL_MISMATCH` / `E_UNKNOWN_CMD` / `E_BAD_ARGS`） | 调用方式错误 | 修改调用方式或升级其中一端 |
 | 执行层（`E_READ_FAILED` / `E_PROBE_FAILED` / `E_NOT_READY` / `E_TIMEOUT` / `E_PTRACE_FAILED`） | 设备端执行失败 | 排障或换策略 |
 | 连接/超时 | 断线 / 假死 / 等待超时 | 检查 adb forward、重试 |
 
@@ -199,8 +196,8 @@ mcp_server/
 .\.venv\Scripts\python.exe -m pytest tests/ -v
 ```
 
-当前：`28 passed, 14 skipped`。14 个 skip 是 `test_bridge.py` 里依赖真实 socket 的传输层
-用例（`test_bad_token_raises_protocol_error` 会挂起，根因与重连配置相关，待修）。
+当前：`42 passed`。`test_bridge.py` 的真实 socket 传输层用例已全部启用，覆盖无 Token
+直连、协议版本校验、心跳判活、错误分层与端到端工具调用。
 
 ## Known limitations
 

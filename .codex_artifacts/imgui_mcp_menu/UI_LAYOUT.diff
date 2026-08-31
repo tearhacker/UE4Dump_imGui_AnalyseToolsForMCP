@@ -1,0 +1,198 @@
+diff --git a/Alltear_UnrealMemoryToolsNewMcp/src/GUI/Android_draw/draw_Gui.cpp b/Alltear_UnrealMemoryToolsNewMcp/src/GUI/Android_draw/draw_Gui.cpp
+index 4323b66..b0353d2 100644
+--- a/Alltear_UnrealMemoryToolsNewMcp/src/GUI/Android_draw/draw_Gui.cpp
++++ b/Alltear_UnrealMemoryToolsNewMcp/src/GUI/Android_draw/draw_Gui.cpp
+@@ -100,7 +100,7 @@ void drawBegin() {
+ 
+ void Layout_tick_UI(bool *main_thread_flag) {
+     { 
+-        ImGui::SetNextWindowSize(ImVec2(1280.0f, 840.0f), ImGuiCond_FirstUseEver);
++        ImGui::SetNextWindowSize(ImVec2(1280.0f, 960.0f), ImGuiCond_FirstUseEver);
+         ImGui::SetNextWindowPos(ImVec2(90.0f, 110.0f), ImGuiCond_FirstUseEver);
+         ImGui::SetNextWindowBgAlpha(0.92f);
+         ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 18.0f);
+diff --git a/Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp b/Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp
+index ceb8779..469d773 100644
+--- a/Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp
++++ b/Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp
+@@ -2796,6 +2796,7 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
+         NavProcess,
+         NavStructs,
+         NavExplorer,
++        NavMcp,
+         NavLogs,
+         NavSettings
+     };
+@@ -3060,24 +3061,6 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
+         drawActionButtons();
+         ImGui::Dummy(ImVec2(0.0f, 10.0f));
+ 
+-        // ---- MCP 命令服务状态与 token（PC 侧连接必须填此 token）----
+-        ImGui::Separator();
+-        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+-        if (UmtMcp::CommandServer::IsRunning())
+-        {
+-            ImGui::TextColored(ImVec4(0.36f, 0.92f, 0.45f, 1.0f), "%s",
+-                               Tr("MCP 服务已启动", "MCP service running"));
+-            ImGui::Text("%s 127.0.0.1:%d", Tr("监听", "Listen"), (int)UmtMcp::kDefaultPort);
+-            ImGui::Text("%s", Tr("MCP Token（填到 PC 侧配置）", "MCP Token (for PC config)"));
+-            ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.36f, 1.0f), "%s",
+-                               UmtMcp::CommandServer::Token().c_str());
+-        }
+-        else
+-        {
+-            ImGui::TextDisabled("%s", Tr("MCP 服务未运行", "MCP service not running"));
+-        }
+-        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+-
+         ImGui::Separator();
+         ImGui::Dummy(ImVec2(0.0f, 6.0f));
+         ImGui::Text("%s: %s", Tr("阶段", "Phase"), phase.c_str());
+@@ -3265,34 +3248,6 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
+     const float leftColumnWidth = 320.0f;
+     const float middleColumnWidth = 310.0f;
+ 
+-    const char *pageTitle = Tr("总览面板", "Overview");
+-    const char *pageSubtitle = Tr("总览面板", "Overview");
+-    switch (navPage)
+-    {
+-        case NavProcess:
+-            pageTitle = Tr("进程管理", "Process Manager");
+-            pageSubtitle = Tr("选择当前游戏进程并执行探测或导出", "Select target process and run probe/dump");
+-            break;
+-        case NavStructs:
+-            pageTitle = Tr("结构浏览", "Struct Browser");
+-            pageSubtitle = Tr("查看 AutoFix 后的结构体字段结果", "Browse AutoFix struct field results");
+-            break;
+-        case NavExplorer:
+-            pageTitle = Tr("SDK 浏览器", "SDK Explorer");
+-            pageSubtitle = Tr("在单独工作区中查看导出的 SDK 内容", "Inspect SDK content in a focused workspace");
+-            break;
+-        case NavLogs:
+-            pageTitle = Tr("运行日志", "Logs");
+-            pageSubtitle = Tr("查看实时输出和错误信息", "Inspect runtime output and errors");
+-            break;
+-        case NavSettings:
+-            pageTitle = Tr("设置中心", "Settings");
+-            pageSubtitle = Tr("语言、主题和项目信息", "Language, theme and project information");
+-            break;
+-        default:
+-            break;
+-    }
+-
+     ImGui::BeginChild("##tool_root", ImVec2(0.0f, 0.0f), false);
+ 
+     ImGui::BeginChild("##sidebar", ImVec2(sidebarWidth, 0.0f), true);
+@@ -3306,6 +3261,7 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
+     if (drawNavButton(Tr("进程", "Processes"), navPage == NavProcess)) navPage = NavProcess;
+     if (drawNavButton(Tr("结构", "Structs"), navPage == NavStructs)) navPage = NavStructs;
+     if (drawNavButton(Tr("SDK", "SDK"), navPage == NavExplorer)) navPage = NavExplorer;
++    if (drawNavButton("MCP", navPage == NavMcp)) navPage = NavMcp;
+     if (drawNavButton(Tr("日志", "Logs"), navPage == NavLogs)) navPage = NavLogs;
+     if (drawNavButton(Tr("设置", "Settings"), navPage == NavSettings)) navPage = NavSettings;
+ 
+@@ -3320,37 +3276,70 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
+     ImGui::SameLine(0.0f, 14.0f);
+ 
+     ImGui::BeginChild("##workspace", ImVec2(0.0f, 0.0f), false);
+-    ImGui::BeginChild("##topbar", ImVec2(0.0f, topBarHeight), true);
+-    ImGui::Text("%s", pageTitle);
+-    ImGui::TextDisabled("%s", pageSubtitle);
+-    if (!selectedPackage.empty())
++    if (navPage == NavOverview)
+     {
+-        ImGui::TextDisabled("%s: %s", Tr("当前目标", "Current target"), selectedPackage.c_str());
++        ImGui::BeginChild("##topbar", ImVec2(0.0f, topBarHeight), true);
++        ImGui::Text("%s", Tr("总览面板", "Overview"));
++        ImGui::TextDisabled("%s", Tr("总览面板", "Overview"));
++        if (!selectedPackage.empty())
++        {
++            ImGui::TextDisabled("%s: %s", Tr("当前目标", "Current target"), selectedPackage.c_str());
++        }
++        else
++        {
++            ImGui::TextDisabled("%s", Tr("当前未选择进程", "No process selected"));
++        }
++
++        const float rightStart = ImGui::GetWindowWidth() - 320.0f;
++        if (rightStart > 0.0f)
++            ImGui::SameLine(rightStart);
++        if (busy)
++            drawStatusChip(Tr("运行中", "Busy"), ImVec4(0.85f, 0.55f, 0.16f, 0.95f));
++        else
++            drawStatusChip(Tr("空闲", "Idle"), ImVec4(0.18f, 0.63f, 0.42f, 0.95f));
++        ImGui::SameLine(0.0f, 10.0f);
++        if (ImGui::Button("ZH", ImVec2(52.0f, 0.0f))) gUiLang = UiLang::ZH;
++        ImGui::SameLine(0.0f, 6.0f);
++        if (ImGui::Button("EN", ImVec2(52.0f, 0.0f))) gUiLang = UiLang::EN;
++        ImGui::SameLine(0.0f, 6.0f);
++        if (ImGui::Button(Tr("退出", "Exit"), ImVec2(78.0f, 0.0f)))
++            *main_thread_flag = false;
++        ImGui::EndChild();
++
++        ImGui::Dummy(ImVec2(0.0f, 12.0f));
+     }
+-    else
++
++    if (navPage == NavMcp)
+     {
+-        ImGui::TextDisabled("%s", Tr("当前未选择进程", "No process selected"));
+-    }
++        ImGui::BeginChild("##mcp_workspace", ImVec2(0.0f, 0.0f), true);
++        drawSectionHeader(Tr("MCP 命令服务", "MCP Command Service"),
++                          Tr("连接信息与 PC 侧配置集中显示在此页",
++                             "Connection details for the PC client are shown here"));
+ 
+-    const float rightStart = ImGui::GetWindowWidth() - 320.0f;
+-    if (rightStart > 0.0f)
+-        ImGui::SameLine(rightStart);
+-    if (busy)
+-        drawStatusChip(Tr("运行中", "Busy"), ImVec4(0.85f, 0.55f, 0.16f, 0.95f));
+-    else
+-        drawStatusChip(Tr("空闲", "Idle"), ImVec4(0.18f, 0.63f, 0.42f, 0.95f));
+-    ImGui::SameLine(0.0f, 10.0f);
+-    if (ImGui::Button("ZH", ImVec2(52.0f, 0.0f))) gUiLang = UiLang::ZH;
+-    ImGui::SameLine(0.0f, 6.0f);
+-    if (ImGui::Button("EN", ImVec2(52.0f, 0.0f))) gUiLang = UiLang::EN;
+-    ImGui::SameLine(0.0f, 6.0f);
+-    if (ImGui::Button(Tr("退出", "Exit"), ImVec2(78.0f, 0.0f)))
+-        *main_thread_flag = false;
+-    ImGui::EndChild();
++        ImGui::TextDisabled("%s", Tr("服务状态", "Service Status"));
++        if (UmtMcp::CommandServer::IsRunning())
++        {
++            ImGui::TextColored(ImVec4(0.36f, 0.92f, 0.45f, 1.0f), "%s",
++                               Tr("MCP 服务已启动", "MCP service running"));
++        }
++        else
++        {
++            ImGui::TextDisabled("%s", Tr("MCP 服务未运行", "MCP service not running"));
++        }
+ 
+-    ImGui::Dummy(ImVec2(0.0f, 12.0f));
++        ImGui::Dummy(ImVec2(0.0f, 12.0f));
++        ImGui::Separator();
++        ImGui::Dummy(ImVec2(0.0f, 12.0f));
++        ImGui::TextDisabled("%s", Tr("监听地址", "Listen Address"));
++        ImGui::Text("127.0.0.1:%d", static_cast<int>(UmtMcp::kDefaultPort));
+ 
+-    if (navPage == NavExplorer)
++        ImGui::Dummy(ImVec2(0.0f, 12.0f));
++        ImGui::TextDisabled("%s", Tr("MCP Token（填到 PC 侧配置）", "MCP Token (for PC config)"));
++        ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.36f, 1.0f), "%s",
++                           UmtMcp::CommandServer::Token().c_str());
++        ImGui::EndChild();
++    }
++    else if (navPage == NavExplorer)
+     {
+         ImGui::BeginChild("##explorer_card", ImVec2(0.0f, 0.0f), true);
+         drawSectionHeader(Tr("SDK 浏览器", "SDK Explorer"),
+@@ -3408,6 +3397,8 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
+         ImGui::Separator();
+         ImGui::Dummy(ImVec2(0.0f, 8.0f));
+         ImGui::Text("%s: 曦曦(DreamFekk)", Tr("创作者", "Author"));
++        ImGui::TextColored(ImVec4(0.78f, 0.16f, 0.20f, 1.0f), "%s: 泪心(tearhacker)",
++                           Tr("贡献者", "Contributor"));
+         ImGui::TextWrapped("GitHub: https://github.com/DreamFekk");
+         ImGui::TextWrapped("%s: %s", Tr("输出目录", "Output"), kOutputDirectory);
+         ImGui::TextWrapped("%s: %s", Tr("渲染接口", "Renderer"), graphics->RenderName);

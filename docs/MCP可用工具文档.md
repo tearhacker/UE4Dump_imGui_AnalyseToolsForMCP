@@ -18,7 +18,7 @@ AI (MCP client)
    │  camelCase 工具名，snake_case 参数
    ▼
 mcp_server (Python, stdio)
-   │  TCP + NDJSON + HELLO/AUTH + 心跳
+   │  TCP + NDJSON + HELLO + 心跳（无需认证）
    ▼
 设备端 CommandServer (C++, 127.0.0.1:35515)
    │  UPPER_SNAKE 命令
@@ -41,15 +41,11 @@ adb devices
 # 2. 端口转发（设备端只监听回环）
 adb forward tcp:35515 tcp:35515
 
-# 3. 取设备端一次性 token（UMT logcat 输出，设备端每次启动随机生成）
-export UMT_TOKEN=<logcat 中的 token>
-
-# 4. 启动 MCP 服务
+# 3. 启动 MCP 服务（无需 Token）
 python server.py
 ```
 
-- token 只从环境变量 `UMT_TOKEN` 读取，不进代码、不进仓库。
-- 设备端重启后 token 会变，必须重新取。
+- 设备端发出 `HELLO` 后，PC 侧确认协议版本一致即可直接调用命令。
 - 连接失败的错误信息会提示 adb forward 排障步骤。
 
 ---
@@ -584,7 +580,7 @@ listModules → resolveSymbol("GWorld")        // 有符号时
 
 | 层级 | 错误码示例 | 含义 | 处理 |
 |---|---|---|---|
-| 协议层 `[协议层错误]` | `E_BAD_TOKEN` / `E_PROTOCOL_MISMATCH` / `E_UNKNOWN_CMD` / `E_BAD_ARGS` / `E_BAD_JSON` | 调用方式错误 | 改调用方式 / 取新 token |
+| 协议层 `[协议层错误]` | `E_PROTOCOL_MISMATCH` / `E_UNKNOWN_CMD` / `E_BAD_ARGS` / `E_BAD_JSON` | 调用方式错误 | 修改调用方式或升级其中一端 |
 | 执行层 | `E_READ_FAILED` / `E_PROBE_FAILED` / `E_NOT_READY` / `E_TIMEOUT` / `E_PTRACE_FAILED` / `E_CANCELLED` | 设备端执行失败 | 排障或换策略 |
 | 连接/超时 `[连接/超时]` | — | 断线 / 假死 / 等待超时 | 检查 adb forward、重试 |
 

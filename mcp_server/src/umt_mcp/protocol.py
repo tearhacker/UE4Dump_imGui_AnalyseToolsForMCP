@@ -5,7 +5,7 @@
 要点（协议 §1/§2/§3）：
 - TCP + NDJSON（每行一个 JSON 对象，以 \\n 结尾）
 - 设备端是服务端，bind 127.0.0.1:35515，仅经 adb forward 暴露
-- 连接后设备端先发 HELLO（不含 token）→ PC 发 AUTH → 设备端回 auth_ok
+- 连接后设备端先发 HELLO，PC 校验协议版本后即可直接发送命令
 - 严格串行，一问一答；心跳帧会插在响应之前，必须能跳过
 
 错误分层（协议 §5）：
@@ -28,16 +28,12 @@ MAX_FRAME_SIZE = config.MAX_FRAME_SIZE  # 1MB，与设备端 Protocol.hpp 一致
 
 # ---------------------------------------------------------------- 握手
 MSG_HELLO = "hello"
-MSG_AUTH = "auth"
-MSG_AUTH_OK = "auth_ok"
-MSG_AUTH_FAIL = "auth_fail"
 MSG_HEARTBEAT = "heartbeat"
 MSG_LOG = "log"
 
 # ---------------------------------------------------------------- 错误码
 # 协议 §5 全表。字符串常量与设备端 Protocol.hpp 的 Err:: 一一对应。
 E_PROTOCOL_MISMATCH = "E_PROTOCOL_MISMATCH"
-E_BAD_TOKEN = "E_BAD_TOKEN"
 E_BAD_JSON = "E_BAD_JSON"
 E_UNKNOWN_CMD = "E_UNKNOWN_CMD"
 E_BAD_ARGS = "E_BAD_ARGS"
@@ -57,7 +53,6 @@ E_PTRACE_FAILED = "E_PTRACE_FAILED"
 PROTOCOL_ERRORS = frozenset(
     {
         E_PROTOCOL_MISMATCH,
-        E_BAD_TOKEN,
         E_BAD_JSON,
         E_UNKNOWN_CMD,
         E_BAD_ARGS,
@@ -81,9 +76,8 @@ EXECUTION_ERRORS = frozenset(
     }
 )
 
-# 连不上 / 握手失败 / 断线 —— 这类要么重连，要么让用户去取新 token，
-# 重试同一条命令没有意义。
-NON_RETRYABLE = frozenset({E_BAD_TOKEN, E_PROTOCOL_MISMATCH, E_UNKNOWN_CMD, E_BAD_ARGS})
+# 协议版本、未知命令和参数错误不会因重试而改变。
+NON_RETRYABLE = frozenset({E_PROTOCOL_MISMATCH, E_UNKNOWN_CMD, E_BAD_ARGS})
 
 
 # ---------------------------------------------------------------- 异常

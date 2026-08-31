@@ -15,7 +15,7 @@
 | 设备端 `src/mcp/` | ✅ **已完整实现**（`CommandServer` + `CommandDispatcher` + `CommandQueue` + `PtraceSession`，共 ~1700 行） |
 | 设备端能力盘点 | ✅ 已有 95%+（L0-L7 全部落地）；`INVALIDATE_PROBE` 单独命令 5 行待补；协议 §8 高级约定（Phase 5）未做 |
 | 43 工具规格 | ✅ 已定稿（A–I 九组，input/output/实现基础/约束齐全），设备端 43 条命令全部注册 |
-| 协议/架构 | ✅ 已定稿（v1.2：stdio + 设备端 127.0.0.1:35515、HELLO+token、命令分级、短等优先、outputSchema、annotations） |
+| 协议/架构 | ✅ 已定稿（v1.2：stdio + 设备端 127.0.0.1:35515、HELLO 后直连、命令分级、短等优先、outputSchema、annotations） |
 
 **核心结论**：规格与架构已足够成熟，工程风险集中在**两端对接**——设备端命令服务是从未存在的全新代码，PC 侧是与阻塞 I/O 交互的 asyncio 服务。必须用契约 + 骨架 + 切片的方式把风险前移。
 
@@ -24,7 +24,7 @@
 ## 1. 企业级流程的五条原则
 
 1. **契约先行（Contract First）**：设备端是 C++、PC 侧是 Python，是两个独立二进制。先用一份 wire protocol 契约把它们解耦，两边并行开发、互不等待。
-2. **Walking Skeleton**：先跑通一条最薄的端到端链路（ping 打通真机），把架构 v1.2 里 13 项风险（bind、token、断线、阻塞 I/O）在投入大批量代码前暴露。
+2. **Walking Skeleton**：先跑通一条最薄的端到端链路（ping 打通真机），把架构 v1.2 里 13 项风险（bind、断线、阻塞 I/O）在投入大批量代码前暴露。
 3. **垂直切片优先于水平铺开**：先完成一条完整业务用例（定位引擎全局），再横向补齐 43 工具。避免"所有层都写一半、没有一个能跑"。
 4. **测试左移（Shift-Left）**：契约测试、故障注入从 Phase 1 就建，不是上线前才补。
 5. **每步可独立验证、可回滚**：每个 Phase 结束有 DoD 验收，产物单独可测。
@@ -51,7 +51,7 @@
 
 | 交付物 | 说明 |
 |---|---|
-| `src/mcp/CommandServer.{hpp,cpp}` | socket `bind(127.0.0.1, 35515)` + HELLO + token 校验 + 换行 JSON 收发 |
+| `src/mcp/CommandServer.{hpp,cpp}` | socket `bind(127.0.0.1, 35515)` + HELLO + 无认证直连 + 换行 JSON 收发 |
 | `src/mcp/CommandDispatcher.{hpp,cpp}` | 命令分级：快命令直执行 / 重活投队列 |
 | 设备端 3 个 demo 命令 | `PING` / `LIST_PROCESSES`（外迁 `FindAutoProcessCandidates`）/ `GET_LOGS`（接环形缓冲） |
 | PC 侧 `bridge.py` + 接线 | 阻塞 socket 走 `asyncio.to_thread`；`ping`/`getCapabilities` 对接真设备 |
@@ -77,7 +77,7 @@
 | 契约测试 | 每个工具返回严格符合 outputSchema（自动化） |
 | 故障注入 | attach 看门狗触发、写不可写地址必拒绝、ESRCH 正常返回、断线重连 |
 | token 预算 | 单响应 ≤4K、常驻 ≤25 工具（F/E 组 listChanged 动态挂载） |
-| 安全 | bind 127.0.0.1、confirmDangerous、token 校验、`getCapabilities` 报泄漏会话 |
+| 安全 | bind 127.0.0.1、confirmDangerous、`getCapabilities` 报泄漏会话 |
 
 ### Phase 5 — 集成验证与发布
 **DoD**：真机完整流程回归通过；三份文档同步；PR 写明每工具增加的常驻 token；提交推送。
@@ -113,7 +113,7 @@ Phase 3（全批完成）─► Phase 4 质量加固 ─► Phase 5 发布
 
 | 风险 | 等级 | 对策（架构 v1.2 已定） |
 |---|---|---|
-| 命令服务 bind 0.0.0.0 = 局域网可写游戏内存 | 🔴 | 强制 bind 127.0.0.1 + HELLO token，Phase 1 就落实 |
+| 命令服务 bind 0.0.0.0 = 局域网可写游戏内存 | 🔴 | 强制 bind 127.0.0.1，仅经 adb forward 暴露，Phase 1 就落实 |
 | FastMCP asyncio 被阻塞 I/O 卡死 | 🔴 | 所有设备调用走 `asyncio.to_thread`，Phase 1 骨架就埋 |
 | 断线重连（USB/adb/杀进程） | 🔴 | 指数退避 + 重连必重新 HELLO + sessionId 失效，Phase 1 实现 |
 | 慢工具触发 AI 重试风暴 | 🟠 | 耗时档位 + 长轮询 + suggestedWaitMs，Phase 3 落地 |

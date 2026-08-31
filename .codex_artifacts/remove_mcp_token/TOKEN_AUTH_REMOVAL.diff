@@ -1,0 +1,1538 @@
+diff --git a/Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp b/Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp
+index 469d773..de42ebb 100644
+--- a/Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp
++++ b/Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp
+@@ -3334,9 +3334,10 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
+         ImGui::Text("127.0.0.1:%d", static_cast<int>(UmtMcp::kDefaultPort));
+ 
+         ImGui::Dummy(ImVec2(0.0f, 12.0f));
+-        ImGui::TextDisabled("%s", Tr("MCP Token（填到 PC 侧配置）", "MCP Token (for PC config)"));
+-        ImGui::TextColored(ImVec4(1.0f, 0.84f, 0.36f, 1.0f), "%s",
+-                           UmtMcp::CommandServer::Token().c_str());
++        ImGui::TextDisabled("%s", Tr("连接方式", "Connection"));
++        ImGui::TextColored(ImVec4(0.36f, 0.92f, 0.45f, 1.0f), "%s",
++                           Tr("无需 Token，客户端配置完成后可直接调用",
++                              "No token required; configured clients can call directly"));
+         ImGui::EndChild();
+     }
+     else if (navPage == NavExplorer)
+@@ -3534,8 +3535,7 @@ int main()
+ 
+         if (UmtMcp::CommandServer::Start(UmtMcp::kDefaultPort, &mcpQueue, kUEDUMPER_VERSION))
+         {
+-            // 一次性 token：用户需填到 PC 侧配置（后续应在 UI 面板显示）
+-            LOGI("[MCP] 命令服务已就绪，一次性 token = %s", UmtMcp::CommandServer::Token().c_str());
++            LOGI("[MCP] 命令服务已就绪，客户端无需 Token 可直接连接");
+         }
+         else
+         {
+diff --git a/Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.cpp b/Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.cpp
+index 28c3ea0..ac46350 100644
+--- a/Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.cpp
++++ b/Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.cpp
+@@ -2,8 +2,6 @@
+ 
+ #include <chrono>
+ #include <cerrno>
+-#include <cstdio>
+-#include <cstdlib>
+ #include <cstring>
+ #include <ctime>
+ #include <vector>
+@@ -26,48 +24,10 @@ using json = nlohmann::json;
+ std::atomic<bool> CommandServer::running_{false};
+ std::atomic<bool> CommandServer::stopRequested_{false};
+ std::thread CommandServer::thread_;
+-std::string CommandServer::token_;
+ std::string CommandServer::buildVersion_ = "1.0.0";
+ uint16_t CommandServer::port_ = kDefaultPort;
+ CommandQueue *CommandServer::queue_ = nullptr;
+ 
+-namespace
+-{
+-std::string GenerateToken()
+-{
+-    // 🔴 安全:使用 /dev/urandom 获取加密级随机字节(比 std::rand 安全得多)
+-    // Android/Linux 环境保证 /dev/urandom 存在
+-    FILE *f = fopen("/dev/urandom", "rb");
+-    if (f)
+-    {
+-        unsigned char buf[8];
+-        size_t n = fread(buf, 1, sizeof(buf), f);
+-        fclose(f);
+-        if (n == sizeof(buf))
+-        {
+-            char out[17];
+-            std::snprintf(out, sizeof(out), "%02x%02x%02x%02x%02x%02x%02x%02x",
+-                          buf[0], buf[1], buf[2], buf[3], buf[4], buf[5], buf[6], buf[7]);
+-            return std::string(out);
+-        }
+-    }
+-    // 回退:高精度时钟 + 进程ID(避免污染全局 rand)
+-    const uint64_t seed = static_cast<uint64_t>(
+-        std::chrono::high_resolution_clock::now().time_since_epoch().count())
+-                          ^ static_cast<uint64_t>(getpid());
+-    char out[17];
+-    std::snprintf(out, sizeof(out), "%08llx%08llx",
+-                  (unsigned long long)(seed & 0xFFFFFFFFULL),
+-                  (unsigned long long)((seed >> 32) & 0xFFFFFFFFULL));
+-    return std::string(out);
+-}
+-}  // namespace
+-
+-std::string CommandServer::Token()
+-{
+-    return token_;
+-}
+-
+ bool CommandServer::IsRunning()
+ {
+     return running_.load();
+@@ -84,7 +44,6 @@ bool CommandServer::Start(uint16_t port, CommandQueue *queue, const std::string
+     port_ = port;
+     if (!buildVersion.empty())
+         buildVersion_ = buildVersion;
+-    token_ = GenerateToken();
+     stopRequested_.store(false);
+ 
+     // 注：此处不 detach，由 Stop() 统一 join 回收，避免线程泄漏
+@@ -145,7 +104,7 @@ void CommandServer::MaybeSendHeartbeat(int sock, time_t &lastHeartbeat, bool bus
+     SendFrame(sock, hb.dump());
+ }
+ 
+-bool CommandServer::HandleFrame(int sock, const std::string &line, bool &authenticated)
++bool CommandServer::HandleFrame(int sock, const std::string &line)
+ {
+     json req;
+     try
+@@ -175,62 +134,6 @@ bool CommandServer::HandleFrame(int sock, const std::string &line, bool &authent
+         return SendFrame(sock, err.dump());
+     }
+ 
+-    // auth 帧：PC 侧证明持有 token（正确的校验方向：客户端持有密钥，服务端校验）
+-    const auto typeIt = req.find("type");
+-    const bool isAuth = (typeIt != req.end() && typeIt->is_string() &&
+-                         typeIt->get<std::string>() == "auth");
+-
+-    // 🔴 安全红线：未认证的客户端不得执行任何命令，否则 token 形同虚设
+-    if (!isAuth && !authenticated)
+-    {
+-        LOGE("[MCP] 未认证的客户端尝试执行命令，断开连接");
+-        json err;
+-        err["type"] = "auth_required";
+-        err["error"] = {{"code", Err::kBadToken}, {"msg", "需先发送 auth 帧完成认证"}};
+-        SendFrame(sock, err.dump());
+-        return false;
+-    }
+-
+-    if (isAuth)
+-    {
+-        // 协议版本校验（协议 §5 E_PROTOCOL_MISMATCH）
+-        const int peerProtocol = req.value("protocol", kProtocolVersion);
+-        if (peerProtocol != kProtocolVersion)
+-        {
+-            LOGE("[MCP] 协议版本不匹配（对端 %d，本端 %d），断开连接",
+-                 peerProtocol, kProtocolVersion);
+-            json err;
+-            err["type"] = "auth_fail";
+-            err["error"] = {{"code", Err::kProtocolMismatch},
+-                            {"msg", "协议版本不匹配"},
+-                            {"detail", {{"serverProtocol", kProtocolVersion},
+-                                        {"clientProtocol", peerProtocol}}}};
+-            SendFrame(sock, err.dump());
+-            return false;
+-        }
+-
+-        std::string got;
+-        const auto tokIt = req.find("token");
+-        if (tokIt != req.end() && tokIt->is_string())
+-            got = tokIt->get<std::string>();
+-
+-        if (got != token_)
+-        {
+-            LOGE("[MCP] token 校验失败，断开连接");
+-            json err;
+-            err["type"] = "auth_fail";
+-            err["error"] = {{"code", Err::kBadToken}, {"msg", "token 不匹配"}};
+-            SendFrame(sock, err.dump());
+-            return false;
+-        }
+-
+-        authenticated = true;
+-        json ok;
+-        ok["type"] = "auth_ok";
+-        ok["protocol"] = kProtocolVersion;
+-        return SendFrame(sock, ok.dump());
+-    }
+-
+     // 普通请求:需要 id + cmd
+     if (!req.contains("id") || !req.contains("cmd"))
+     {
+@@ -355,9 +258,6 @@ void CommandServer::ServerLoop()
+         // 🔴 新连接:清空队列,丢弃上一连接的未消费响应(防止孤儿响应污染)
+         CommandDispatcher::Clear();
+ 
+-        // 连接级认证状态：每个新连接都必须重新 auth
+-        bool authenticated = false;
+-
+         // HELLO：capabilities 由实际注册的命令生成，避免硬编码漂移
+         json hello;
+         hello["type"] = "hello";
+@@ -430,9 +330,9 @@ void CommandServer::ServerLoop()
+                     break;
+                 }
+ 
+-                if (!HandleFrame(clientFd, line, authenticated))
++                if (!HandleFrame(clientFd, line))
+                 {
+-                    connected = false;  // 认证失败 / token 错误等情况
++                    connected = false;
+                     break;
+                 }
+             }
+diff --git a/Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.hpp b/Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.hpp
+index 3eaed78..30e7e8b 100644
+--- a/Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.hpp
++++ b/Alltear_UnrealMemoryToolsNewMcp/src/mcp/CommandServer.hpp
+@@ -23,15 +23,12 @@ namespace UmtMcp
+ class CommandServer
+ {
+ public:
+-    // 启动服务（非阻塞，内部起线程）。token 由本类随机生成，通过 Token() 取用。
++    // 启动服务（非阻塞，内部起线程）。连接建立后可直接执行命令。
+     // buildVersion 会写进 HELLO 帧（应传 kUEDUMPER_VERSION）
+     static bool Start(uint16_t port, CommandQueue *queue, const std::string &buildVersion = "1.0.0");
+     static void Stop();
+     static bool IsRunning();
+ 
+-    // 一次性 token，需在 UMT 界面展示给用户（用户填到 PC 侧配置）
+-    static std::string Token();
+-
+ private:
+     static void ServerLoop();
+ 
+@@ -40,8 +37,7 @@ private:
+     static bool SendAll(int sock, const char *data, size_t len);
+ 
+     // 处理单条已接收的帧（请求入队 → 等待响应 → 发送）
+-    // authenticated 为**连接级**状态：未通过 auth 的客户端只能发 auth 帧
+-    static bool HandleFrame(int sock, const std::string &line, bool &authenticated);
++    static bool HandleFrame(int sock, const std::string &line);
+ 
+     // 心跳（等待响应期间也会被调用）
+     static void MaybeSendHeartbeat(int sock, time_t &lastHeartbeat, bool busy);
+@@ -49,7 +45,6 @@ private:
+     static std::atomic<bool> running_;
+     static std::atomic<bool> stopRequested_;
+     static std::thread thread_;
+-    static std::string token_;
+     static std::string buildVersion_;
+     static uint16_t port_;
+     static CommandQueue *queue_;
+diff --git a/Alltear_UnrealMemoryToolsNewMcp/src/mcp/Protocol.hpp b/Alltear_UnrealMemoryToolsNewMcp/src/mcp/Protocol.hpp
+index 41a7379..6dad44d 100644
+--- a/Alltear_UnrealMemoryToolsNewMcp/src/mcp/Protocol.hpp
++++ b/Alltear_UnrealMemoryToolsNewMcp/src/mcp/Protocol.hpp
+@@ -35,7 +35,6 @@ inline const int kSessionIdleTimeoutMs = 30000;
+ namespace Err
+ {
+ inline const char *const kProtocolMismatch = "E_PROTOCOL_MISMATCH";
+-inline const char *const kBadToken = "E_BAD_TOKEN";
+ inline const char *const kBadJson = "E_BAD_JSON";
+ inline const char *const kUnknownCmd = "E_UNKNOWN_CMD";
+ inline const char *const kBadArgs = "E_BAD_ARGS";
+diff --git "a/docs/MCP\345\217\257\347\224\250\345\267\245\345\205\267\346\226\207\346\241\243.md" "b/docs/MCP\345\217\257\347\224\250\345\267\245\345\205\267\346\226\207\346\241\243.md"
+index 74c303f..370dcca 100644
+--- "a/docs/MCP\345\217\257\347\224\250\345\267\245\345\205\267\346\226\207\346\241\243.md"
++++ "b/docs/MCP\345\217\257\347\224\250\345\267\245\345\205\267\346\226\207\346\241\243.md"
+@@ -18,7 +18,7 @@ AI (MCP client)
+    │  camelCase 工具名，snake_case 参数
+    ▼
+ mcp_server (Python, stdio)
+-   │  TCP + NDJSON + HELLO/AUTH + 心跳
++   │  TCP + NDJSON + HELLO + 心跳（无需认证）
+    ▼
+ 设备端 CommandServer (C++, 127.0.0.1:35515)
+    │  UPPER_SNAKE 命令
+@@ -41,15 +41,11 @@ adb devices
+ # 2. 端口转发（设备端只监听回环）
+ adb forward tcp:35515 tcp:35515
+ 
+-# 3. 取设备端一次性 token（UMT logcat 输出，设备端每次启动随机生成）
+-export UMT_TOKEN=<logcat 中的 token>
+-
+-# 4. 启动 MCP 服务
++# 3. 启动 MCP 服务（无需 Token）
+ python server.py
+ ```
+ 
+-- token 只从环境变量 `UMT_TOKEN` 读取，不进代码、不进仓库。
+-- 设备端重启后 token 会变，必须重新取。
++- 设备端发出 `HELLO` 后，PC 侧确认协议版本一致即可直接调用命令。
+ - 连接失败的错误信息会提示 adb forward 排障步骤。
+ 
+ ---
+@@ -584,7 +580,7 @@ listModules → resolveSymbol("GWorld")        // 有符号时
+ 
+ | 层级 | 错误码示例 | 含义 | 处理 |
+ |---|---|---|---|
+-| 协议层 `[协议层错误]` | `E_BAD_TOKEN` / `E_PROTOCOL_MISMATCH` / `E_UNKNOWN_CMD` / `E_BAD_ARGS` / `E_BAD_JSON` | 调用方式错误 | 改调用方式 / 取新 token |
++| 协议层 `[协议层错误]` | `E_PROTOCOL_MISMATCH` / `E_UNKNOWN_CMD` / `E_BAD_ARGS` / `E_BAD_JSON` | 调用方式错误 | 修改调用方式或升级其中一端 |
+ | 执行层 | `E_READ_FAILED` / `E_PROBE_FAILED` / `E_NOT_READY` / `E_TIMEOUT` / `E_PTRACE_FAILED` / `E_CANCELLED` | 设备端执行失败 | 排障或换策略 |
+ | 连接/超时 `[连接/超时]` | — | 断线 / 假死 / 等待超时 | 检查 adb forward、重试 |
+ 
+diff --git "a/docs/MCP\345\274\200\345\217\221\350\267\257\347\272\277\345\233\276.md" "b/docs/MCP\345\274\200\345\217\221\350\267\257\347\272\277\345\233\276.md"
+index aa628d1..b1b3af1 100644
+--- "a/docs/MCP\345\274\200\345\217\221\350\267\257\347\272\277\345\233\276.md"
++++ "b/docs/MCP\345\274\200\345\217\221\350\267\257\347\272\277\345\233\276.md"
+@@ -15,7 +15,7 @@
+ | 设备端 `src/mcp/` | ✅ **已完整实现**（`CommandServer` + `CommandDispatcher` + `CommandQueue` + `PtraceSession`，共 ~1700 行） |
+ | 设备端能力盘点 | ✅ 已有 95%+（L0-L7 全部落地）；`INVALIDATE_PROBE` 单独命令 5 行待补；协议 §8 高级约定（Phase 5）未做 |
+ | 43 工具规格 | ✅ 已定稿（A–I 九组，input/output/实现基础/约束齐全），设备端 43 条命令全部注册 |
+-| 协议/架构 | ✅ 已定稿（v1.2：stdio + 设备端 127.0.0.1:35515、HELLO+token、命令分级、短等优先、outputSchema、annotations） |
++| 协议/架构 | ✅ 已定稿（v1.2：stdio + 设备端 127.0.0.1:35515、HELLO 后直连、命令分级、短等优先、outputSchema、annotations） |
+ 
+ **核心结论**：规格与架构已足够成熟，工程风险集中在**两端对接**——设备端命令服务是从未存在的全新代码，PC 侧是与阻塞 I/O 交互的 asyncio 服务。必须用契约 + 骨架 + 切片的方式把风险前移。
+ 
+@@ -24,7 +24,7 @@
+ ## 1. 企业级流程的五条原则
+ 
+ 1. **契约先行（Contract First）**：设备端是 C++、PC 侧是 Python，是两个独立二进制。先用一份 wire protocol 契约把它们解耦，两边并行开发、互不等待。
+-2. **Walking Skeleton**：先跑通一条最薄的端到端链路（ping 打通真机），把架构 v1.2 里 13 项风险（bind、token、断线、阻塞 I/O）在投入大批量代码前暴露。
++2. **Walking Skeleton**：先跑通一条最薄的端到端链路（ping 打通真机），把架构 v1.2 里 13 项风险（bind、断线、阻塞 I/O）在投入大批量代码前暴露。
+ 3. **垂直切片优先于水平铺开**：先完成一条完整业务用例（定位引擎全局），再横向补齐 43 工具。避免"所有层都写一半、没有一个能跑"。
+ 4. **测试左移（Shift-Left）**：契约测试、故障注入从 Phase 1 就建，不是上线前才补。
+ 5. **每步可独立验证、可回滚**：每个 Phase 结束有 DoD 验收，产物单独可测。
+@@ -51,7 +51,7 @@
+ 
+ | 交付物 | 说明 |
+ |---|---|
+-| `src/mcp/CommandServer.{hpp,cpp}` | socket `bind(127.0.0.1, 35515)` + HELLO + token 校验 + 换行 JSON 收发 |
++| `src/mcp/CommandServer.{hpp,cpp}` | socket `bind(127.0.0.1, 35515)` + HELLO + 无认证直连 + 换行 JSON 收发 |
+ | `src/mcp/CommandDispatcher.{hpp,cpp}` | 命令分级：快命令直执行 / 重活投队列 |
+ | 设备端 3 个 demo 命令 | `PING` / `LIST_PROCESSES`（外迁 `FindAutoProcessCandidates`）/ `GET_LOGS`（接环形缓冲） |
+ | PC 侧 `bridge.py` + 接线 | 阻塞 socket 走 `asyncio.to_thread`；`ping`/`getCapabilities` 对接真设备 |
+@@ -77,7 +77,7 @@
+ | 契约测试 | 每个工具返回严格符合 outputSchema（自动化） |
+ | 故障注入 | attach 看门狗触发、写不可写地址必拒绝、ESRCH 正常返回、断线重连 |
+ | token 预算 | 单响应 ≤4K、常驻 ≤25 工具（F/E 组 listChanged 动态挂载） |
+-| 安全 | bind 127.0.0.1、confirmDangerous、token 校验、`getCapabilities` 报泄漏会话 |
++| 安全 | bind 127.0.0.1、confirmDangerous、`getCapabilities` 报泄漏会话 |
+ 
+ ### Phase 5 — 集成验证与发布
+ **DoD**：真机完整流程回归通过；三份文档同步；PR 写明每工具增加的常驻 token；提交推送。
+@@ -113,7 +113,7 @@ Phase 3（全批完成）─► Phase 4 质量加固 ─► Phase 5 发布
+ 
+ | 风险 | 等级 | 对策（架构 v1.2 已定） |
+ |---|---|---|
+-| 命令服务 bind 0.0.0.0 = 局域网可写游戏内存 | 🔴 | 强制 bind 127.0.0.1 + HELLO token，Phase 1 就落实 |
++| 命令服务 bind 0.0.0.0 = 局域网可写游戏内存 | 🔴 | 强制 bind 127.0.0.1，仅经 adb forward 暴露，Phase 1 就落实 |
+ | FastMCP asyncio 被阻塞 I/O 卡死 | 🔴 | 所有设备调用走 `asyncio.to_thread`，Phase 1 骨架就埋 |
+ | 断线重连（USB/adb/杀进程） | 🔴 | 指数退避 + 重连必重新 HELLO + sessionId 失效，Phase 1 实现 |
+ | 慢工具触发 AI 重试风暴 | 🟠 | 耗时档位 + 长轮询 + suggestedWaitMs，Phase 3 落地 |
+diff --git a/docs/mcp-protocol.md b/docs/mcp-protocol.md
+index 6dd5fd2..4796fc4 100644
+--- a/docs/mcp-protocol.md
++++ b/docs/mcp-protocol.md
+@@ -31,15 +31,13 @@
+    ↓
+ PC 侧 connect
+    ↓
+-设备端主动发 HELLO（仅协议/构建/能力，🔴 不含 token）
++设备端主动发 HELLO（协议/构建/能力）
+    ↓
+-PC 侧发 AUTH 帧（携带一次性 token）
++PC 侧校验 protocol   ──不匹配──> 明确报错并 close()
++   ↓ 通过
++直接请求-响应（无需认证，严格串行，一问一答）
+    ↓
+-设备端校验 protocol + token   ──不符/不匹配──> 回 auth_fail 并 close()
+-   ↓ 通过（回 auth_ok）
+-正常请求-响应（严格串行，一问一答，🔴 未 AUTH 前任何命令返回 auth_required 并断开）
+-   ↓
+-断开 → PC 侧指数退避重连（1/2/4…≤30s）→ 重连后必重新 HELLO + AUTH
++断开 → PC 侧指数退避重连（1/2/4…≤30s）→ 重连后重新校验 HELLO
+ ```
+ 
+ 🔴 **重连后所有 `sessionId` 立即失效**（扫描候选集、类索引、job 全部作废，架构 v1.2 issue #5）。
+@@ -48,15 +46,13 @@ PC 侧发 AUTH 帧（携带一次性 token）
+ 
+ ## 3. 消息格式
+ 
+-### 3.1 HELLO（设备端 → PC，连接建立后立即发，🔴 不含 token）
++### 3.1 HELLO（设备端 → PC，连接建立后立即发送）
+ 
+ ```json
+ {"type":"hello","protocol":1,"build":"1.0.0","capabilities":["PING","LIST_PROCESSES","GET_LOGS"]}
+ ```
+ 
+-> 🔴 **HELLO 不携带 token**：token 是一次性共享密钥，只在 `AUTH` 帧由 PC 侧提交、设备端校验。
+-> 若 HELLO 把 token 广播出去，任何本地客户端连上即免费拿到密钥，鉴权形同虚设。
+-> token 由设备端 `GenerateToken()` 在 `Start()` 时生成，用户从 UMT 界面/日志取得后填入 PC 侧配置。
++> 设备端不要求 Token，也不存在 AUTH 帧。PC 侧确认 `protocol` 一致后可直接发送请求。
+ 
+ | 字段 | 含义 |
+ |---|---|
+@@ -64,31 +60,6 @@ PC 侧发 AUTH 帧（携带一次性 token）
+ | `build` | UMT 构建版本，供 `getCapabilities` 暴露与排障 |
+ | `capabilities` | 设备端当前支持的命令列表（ptrace 不可用时不含 F 组命令） |
+ 
+-### 3.1.1 AUTH（PC → 设备端，HELLO 之后、首个命令之前必发）
+-
+-```json
+-{"type":"auth","protocol":1,"token":"a3f9c2e1"}
+-```
+-
+-| 字段 | 含义 |
+-|---|---|
+-| `protocol` | 协议版本，**必须与 HELLO 一致**，否则设备端回 `E_PROTOCOL_MISMATCH` 并断开 |
+-| `token` | 用户从 UMT 界面/日志取得的一次性随机 token，PC 侧配置填入 |
+-
+-设备端校验通过 → 回 `auth_ok`：
+-
+-```json
+-{"type":"auth_ok","protocol":1}
+-```
+-
+-校验失败（token 不符 / 协议不匹配）→ 回 `auth_fail` 并断开连接：
+-
+-```json
+-{"type":"auth_fail","error":{"code":"E_BAD_TOKEN","msg":"token 不匹配"}}
+-```
+-
+-🔴 **未 AUTH 前**：设备端对任何非 `auth` 帧一律回 `auth_required` + `E_BAD_TOKEN` 并断开（安全红线，见 `CommandServer.cpp`）。
+-
+ ### 3.2 请求（PC → 设备端）
+ 
+ ```json
+@@ -176,8 +147,7 @@ PC 侧发 AUTH 帧（携带一次性 token）
+ 
+ | 错误码 | 含义 | PC 侧行为 |
+ |---|---|---|
+-| `E_PROTOCOL_MISMATCH` | HELLO / AUTH 的 protocol 不匹配 | 断开，明确报错，不重试 |
+-| `E_BAD_TOKEN` | token 校验失败 | 断开，提示用户在 UMT 界面取新 token |
++| `E_PROTOCOL_MISMATCH` | HELLO 的 protocol 与 PC 侧不匹配 | 断开，明确报错，不重试 |
+ | `E_BAD_JSON` | JSON 解析失败 | 协议错误 |
+ | `E_UNKNOWN_CMD` | 未知命令名 | 协议错误 |
+ | `E_BAD_ARGS` | 参数 schema 校验失败 | 协议错误 |
+@@ -410,10 +380,6 @@ PC 侧发 AUTH 帧（携带一次性 token）
+ // get_logs.response
+ {"id":3,"ok":true,"data":{"lines":[{"index":0,"level":"E","timestamp":"","message":"[Bootstrap] 通用方式搜索 GUObject 失败"}],"totalLines":1}}
+ 
+-// hello（🔴 不含 token）
++// hello（收到并确认 protocol 后即可直接发送上面的请求）
+ {"type":"hello","protocol":1,"build":"1.0.0","capabilities":["PING","LIST_PROCESSES","GET_LOGS"]}
+-// auth.request（HELLO 之后、首个命令之前必发）
+-{"type":"auth","protocol":1,"token":"a3f9c2e1"}
+-// auth.response（成功）
+-{"type":"auth_ok","protocol":1}
+ ```
+diff --git "a/docs/mcp_server\345\274\200\345\217\221\346\255\245\351\252\244.md" "b/docs/mcp_server\345\274\200\345\217\221\346\255\245\351\252\244.md"
+index 0a1c90c..cdb71c5 100644
+--- "a/docs/mcp_server\345\274\200\345\217\221\346\255\245\351\252\244.md"
++++ "b/docs/mcp_server\345\274\200\345\217\221\346\255\245\351\252\244.md"
+@@ -40,7 +40,7 @@ mcp_server/
+ ├── requirements.txt            ⬜ 锁版本：mcp / capstone / pytest
+ ├── src/umt_mcp/                ⬜ 包（避免 import 路径坑）
+ │   ├── __init__.py
+-│   ├── config.py               端口 35515、token、超时、waitMs 默认值
++│   ├── config.py               端口 35515、超时、waitMs 默认值
+ │   ├── protocol.py             设备端 wire protocol（帧/HELLO/错误码）
+ │   ├── bridge.py               socket 客户端 + 重连 + RLock 串行
+ │   ├── adb.py                  adb forward 管理
+@@ -77,13 +77,13 @@ mcp_server/
+ - **验收**：`python -c "import umt_mcp"` 通过；`pip install -r requirements.txt` 可复现
+ 
+ ### Step 2　协议契约层 `protocol.py`（**Phase 0 核心**）
+-- **产出**：✅ 协议文档 **`docs/mcp-protocol.md` 已定稿**（NDJSON 帧、HELLO+token、
++- **产出**：✅ 协议文档 **`docs/mcp-protocol.md` 已定稿**（NDJSON 帧、HELLO、
+   请求/响应、长任务与长轮询、错误码表、43 命令表、命令分级、契约样例）
+ - **待做**：`src/umt_mcp/protocol.py` —— 按协议实现编解码（帧读写、HELLO 校验、错误码枚举、命令表常量）
+ - **验收**：`tests/contract/` 黄金样例可被 PC 侧与设备端测试共同引用；`test_protocol.py` 全过
+ 
+ ### Step 3　设备桥接层 `bridge.py`
+-- **产出**：socket 客户端（连 `127.0.0.1:35515`）+ HELLO+token 校验 + **指数退避重连（1/2/4…≤30s）** + `RLock` 串行化 + `asyncio.to_thread` 包装阻塞 I/O
++- **产出**：socket 客户端（连 `127.0.0.1:35515`）+ HELLO 协议校验 + **指数退避重连（1/2/4…≤30s）** + `RLock` 串行化 + `asyncio.to_thread` 包装阻塞 I/O
+ - **🔴 心跳判活（防卡死必需）**：后台收心跳帧（协议 §3.8，设备端每 2s 一帧）；
+   **超过 10s 无心跳判定设备端假死** → 断开重连。这让 PC 侧能区分「**在算**」（心跳正常 busy=true）与「**死了**」（无心跳）
+ - **软超时**：单命令等待超过 `SOCKET_TIMEOUT`（60s）也要能中断等待并探活，不能无限阻塞
+@@ -164,7 +164,7 @@ mcp_server/
+ ### 设备端最小闭环（架构 §5.6.3，协议见 `docs/mcp-protocol.md`）
+ 
+ ```
+-src/mcp/CommandServer.{hpp,cpp}     socket 监听 + HELLO + token + NDJSON 收发   ~400 行
++src/mcp/CommandServer.{hpp,cpp}     socket 监听 + HELLO + NDJSON 收发           ~400 行
+ src/mcp/CommandQueue.{hpp,cpp}      mutex + condition_variable + 队列           ~250 行
+ src/mcp/CommandDispatcher.{hpp,cpp} 命令名 → 实现映射                            ~100 行
+ 3 个 [MVP] 命令                      PING / LIST_PROCESSES / GET_LOGS            ~100 行
+@@ -179,7 +179,7 @@ executable.cpp 接线                  起线程 + 每帧 poll
+ 1. 🔴 **bind `127.0.0.1`，绝不 `0.0.0.0`** —— root + 无认证 + 内存写接口，局域网暴露 = 任意设备可读写游戏内存
+ 2. 🔴 **命令分级**（协议 §7）—— 快命令直执行，重活投 `gWorkerThread`。否则分钟级扫描期间
+    `PING`/`GET_LOGS` 全排队，AI 误判掉线触发重试风暴
+-3. 🔴 **HELLO + 随机 token** —— 界面显示一次性 token，PC 侧配置填入，不符直接 `close()`
++3. **HELLO 后直接调用** —— 客户端只需校验协议版本，无需额外认证帧
+ 
+ ### 推进策略（串行，单人开发并行无收益）
+ 
+diff --git "a/docs/\346\263\252\345\277\203UE4_imGui_AnalyseToolsForMCp\345\274\200\345\217\221\345\277\205\350\257\273\346\236\266\346\236\204.md" "b/docs/\346\263\252\345\277\203UE4_imGui_AnalyseToolsForMCp\345\274\200\345\217\221\345\277\205\350\257\273\346\236\266\346\236\204.md"
+index cf93a02..fb18352 100644
+--- "a/docs/\346\263\252\345\277\203UE4_imGui_AnalyseToolsForMCp\345\274\200\345\217\221\345\277\205\350\257\273\346\236\266\346\236\204.md"
++++ "b/docs/\346\263\252\345\277\203UE4_imGui_AnalyseToolsForMCp\345\274\200\345\217\221\345\277\205\350\257\273\346\236\266\346\236\204.md"
+@@ -41,7 +41,7 @@
+ | **1** | **单次响应无 token 上限**：`readMemory size≤65536` = hex 13 万字符 ≈ **33K token 一次响应**，可直接打爆上下文；`getLogs maxLines=200`≈6K；`scanCandidates maxCandidates=200`≈10K | 🔴 灾难 | **硬约束：单工具响应 ≤ 4K token**。`readMemory` size 上限砍到 4096；`getLogs` 默认 50；`maxCandidates` 默认 50；大响应一律分页 |
+ | **2** | **慢工具无防护**：全内存扫描在 45.8 万对象游戏上分钟级，AI 只见调用挂起 → **重试风暴**（重扫 = 又几分钟，还翻倍占 worker） | 🔴 灾难 | ① 工具描述必须写**预期耗时档位**（快<1s / 中<30s / 慢<5min）；② 轮询响应带 `progress + etaSeconds + suggestedWaitMs`，AI 按建议等待；③ **长轮询**：`waitMs` 内未完成时设备端可 hold 连接至完成或上限，把 N 次空轮询压成 1 次 |
+ | **3** | **AI 判定无证据内嵌**：scan 返回地址列表 → AI 挑一个 → 再调 sample → 三轮往返，且 AI 可能跳过采样直接"猜"最像的 | 🔴 幻觉高危 | `scanGNames`/`scanObjects` 返回**每个候选内嵌前 3 个名字样本** + `engineNameHits` 评分。扫描-采样-判定**三轮压一轮**，且证据强制在场，AI 想跳过都跳不过 |
+-| **4** | **socket 未规定 bind 地址**：root 权限 + 无认证 + 内存写接口，若 bind 0.0.0.0 = **局域网任意设备可读写目标游戏内存** | 🔴 安全漏洞 | **强制 bind 127.0.0.1**，仅经 adb forward 暴露；PC 侧连 `127.0.0.1:35515`。HELLO 握手外加随机 token 校验（首次连接由 UMT 界面显示，PC 侧配置填入） |
++| **4** | **socket 未规定 bind 地址**：root 权限 + 无认证 + 内存写接口，若 bind 0.0.0.0 = **局域网任意设备可读写目标游戏内存** | 🔴 安全漏洞 | **强制 bind 127.0.0.1**，仅经 adb forward 暴露；PC 侧连 `127.0.0.1:35515`，HELLO 后无需认证可直接调用 |
+ | **5** | **断线重连协议缺失**：USB 拔插 / adb 掉线 / UMT 被杀是**最高频故障**，架构只处理了设备进程崩溃（ESRCH） | 🔴 严重 | PC 侧 bridge：指数退避重连（1s/2s/4s/…上限 30s）；重连成功必**重新 HELLO**；**所有 sessionId 立即失效**；in-flight 调用返回 `isError: true` + `"连接已断开，已自动重连，请重试"` |
+ | 6 | **outputSchema 的 token 成本漏算**：§1.7 只算 description（10K），每个 outputSchema 200–500 token × 42 = **另加 8–20K**，真实常驻 25–35K | 🟠 成本 | ① 描述瘦身：`<important_notes>` ≤5 条、总 ≤150 token；② **分组按需挂载**：核心 20 个常驻，F 组（ptrace）/E 组靠 `tools.listChanged` 动态加载；③ 上限 45 不变但**常驻 ≤25** |
+ | 7 | **PC 并发与串行协议矛盾**：MCP 允许并行 tool calls，但设备协议是"发一收一"，架构只说 RLock 串行化——并行调用会排队且无请求匹配 | 🟠 延迟 | 明写：**协议为严格请求-响应串行**，PC 侧 RLock 必须；并行 tool calls 串行执行（正确但延迟叠加）。若将来要并行，协议加 `reqId` 匹配——v1 不做 |
+@@ -289,8 +289,7 @@ PC 侧与设备端是两个二进制，**换版后静默不兼容是真实风险
+ 
+ - **设备端 `CommandServer` 强制 `bind("127.0.0.1", 35515)`**，绝不监听 `0.0.0.0` / `INADDR_ANY`
+ - 仅经 `adb forward tcp:35515 tcp:35515` 暴露；PC 侧 `ToolDispatcher` 连 `127.0.0.1:35515`
+-- `HELLO` 握手**外加随机 token 校验**：首次连接由 UMT 界面显示一次性 token，PC 侧配置填入；
+-  token 不符直接 `close()`
++- `HELLO` 握手后直接调用：客户端只校验 `protocol`，不发送 Token 或 AUTH 帧
+ - 端口号从 `35515` 提为可配置（避免与已运行实例冲突），但默认仍仅本地
+ 
+ ### ❗修正 6：断线重连协议（**v1.2，issue #5**）
+@@ -298,7 +297,7 @@ PC 侧与设备端是两个二进制，**换版后静默不兼容是真实风险
+ > USB 拔插 / adb 掉线 / UMT 被杀是**最高频故障**，v1.1 只处理了设备进程崩溃（ESRCH）。
+ 
+ - PC 侧 `ToolDispatcher` 维护连接，断线后**指数退避重连**（1s / 2s / 4s / … 上限 30s）
+-- 重连成功**必重新 `HELLO`**（含 token 校验与 `protocol` 校验）
++- 重连成功**必重新 `HELLO`**并校验 `protocol`
+ - 重连后**所有 `sessionId` 立即失效**（扫描候选集、类索引、job 全部作废），AI 须重建
+ - 重连期间 in-flight 调用返回 `isError: true` + `"连接已断开，已自动重连，请重试"`
+ - 设备端被杀重启后，旧会话数据不恢复——这是预期行为，文档写明
+@@ -715,7 +714,7 @@ async def start_probe(wait_ms: int = Field(default=5000, ge=0, le=60000)) -> dic
+ > 两类命令以 `DumpUiState` mutex 保护的数据为界，避免竞态。
+ >
+ > 🔴 **安全（v1.2，issue #4）**：命令服务 `bind("127.0.0.1")`，详见 §2.1 修正 5。
+-> 绝不监听 `0.0.0.0`；HELLO 含随机 token 校验。
++> 绝不监听 `0.0.0.0`；HELLO 后无需认证可直接调用。
+ | 命令队列与分发 | mutex + condition_variable + 分发表 | 250 |
+ | 符号定位 | 按版本试 4 个引擎原生符号 + 解引用回减 | 150 |
+ | **多锚点改造** | 改 `GetNamesPtr()`，用上 §2.3 那份名单 | 80 |
+diff --git "a/docs/\350\256\276\345\244\207\347\253\257\345\221\275\344\273\244\346\234\215\345\212\241\350\256\276\350\256\241.md" "b/docs/\350\256\276\345\244\207\347\253\257\345\221\275\344\273\244\346\234\215\345\212\241\350\256\276\350\256\241.md"
+index 0a404d3..f39255b 100644
+--- "a/docs/\350\256\276\345\244\207\347\253\257\345\221\275\344\273\244\346\234\215\345\212\241\350\256\276\350\256\241.md"
++++ "b/docs/\350\256\276\345\244\207\347\253\257\345\221\275\344\273\244\346\234\215\345\212\241\350\256\276\350\256\241.md"
+@@ -37,7 +37,7 @@
+ ```
+ ┌─ CommandServer 线程（新增）────────────────┐
+ │  socket bind/listen/accept                 │
+-│  HELLO 握手 + token 校验                    │
++│  HELLO 握手（无需认证）                      │
+ │  NDJSON 收帧 → 入队                         │
+ │  NDJSON 发帧（响应/日志推送）                │
+ │  ⚠️ 绝不触碰任何 UMT 全局状态                │
+@@ -213,8 +213,7 @@ AI 只拿到它要的那一个类
+ 1. 🔴 **`bind("127.0.0.1", 35515)`，绝不 `0.0.0.0` / `INADDR_ANY`**
+    UMT 以 root 运行、提供内存读写接口。bind 到 `0.0.0.0` = 局域网任意设备可读写目标游戏内存。
+    仅经 `adb forward` 暴露。
+-2. 🔴 **HELLO + 随机 token**：首次连接由 UMT 界面显示一次性 token，PC 侧配置填入；
+-   token 不符直接 `close()`，**不回任何消息**。
++2. **HELLO 后直接调用**：客户端校验协议版本一致后即可发送命令，不需要 Token 或 AUTH 帧。
+ 3. 🔴 **协议版本校验**：`protocol` 不匹配明确报错断开，不让后续命令一路失败。
+ 4. **单连接（永久）**：只接受一个客户端（单对单是设计前提，见 §0）。
+    新连接到来时**直接拒绝**（回错误后 `close()`），避免顶替现有会话状态。
+@@ -238,7 +237,7 @@ AI 只拿到它要的那一个类
+ | 4 | 发 `LIST_PROCESSES` 返回设备上的 UE 进程列表（元梦之星应在列） |
+ | 5 | 发 `GET_LOGS` 返回设备端日志（含 `[Bootstrap] …` 之类真实条目） |
+ | 6 | **杀掉 UMT 再重启**，PC 侧能检测到断线并按退避重连，重连后重新 HELLO 成功 |
+-| 7 | token 错误时连接被拒，PC 侧得到明确错误而非超时 |
++| 7 | 不配置 Token，首条 `PING` 命令仍可直接调用成功 |
+ 
+ ---
+ 
+diff --git a/mcp_server/README.md b/mcp_server/README.md
+index 6f76e74..7f7bdec 100644
+--- a/mcp_server/README.md
++++ b/mcp_server/README.md
+@@ -6,7 +6,7 @@ ptrace 远程调用。
+ 
+ - 基于官方 Python MCP SDK（`mcp` 包，FastMCP），stdio 传输
+ - 设备通信：TCP + NDJSON，`adb forward tcp:35515 tcp:35515` 隧道
+-- 协议：HELLO → AUTH（一次性 token）→ 心跳 → 严格串行一问一答
++- 协议：HELLO → 直接命令调用（无需认证）→ 心跳 → 严格串行一问一答
+ - 工具名对外为 **camelCase**（如 `readMemory`），设备端命令为 **UPPER_SNAKE**
+   （如 `MEMORY_READ`），由 `tools.py` 自动映射，启动时 `self_check()` 校验
+ 
+@@ -28,11 +28,8 @@ src/umt_mcp/protocol.py 帧常量、错误码、协议层/执行层错误分层
+ 
+ 1. 手机 adb 连接：`adb devices`
+ 2. 端口转发（设备端只监听回环）：`adb forward tcp:35515 tcp:35515`
+-3. 取设备端一次性 token（UMT logcat 输出，每次启动随机生成）：
+-   ```bash
+-   export UMT_TOKEN=<logcat 中的 token>
+-   ```
+-   token 只从环境变量读取，不进代码、不进仓库；设备端重启后必须换新。
++
++设备端不要求 Token。PC 侧收到 `HELLO` 并确认协议版本一致后即可直接调用命令。
+ 
+ ## Layout
+ 
+@@ -189,7 +186,7 @@ mcp_server/
+ 
+ | 层级 | 含义 | 处理 |
+ |---|---|---|
+-| 协议层（`E_BAD_TOKEN` / `E_PROTOCOL_MISMATCH` / `E_UNKNOWN_CMD` / `E_BAD_ARGS`） | 调用方式错误 | 改调用方式 / 取新 token |
++| 协议层（`E_PROTOCOL_MISMATCH` / `E_UNKNOWN_CMD` / `E_BAD_ARGS`） | 调用方式错误 | 修改调用方式或升级其中一端 |
+ | 执行层（`E_READ_FAILED` / `E_PROBE_FAILED` / `E_NOT_READY` / `E_TIMEOUT` / `E_PTRACE_FAILED`） | 设备端执行失败 | 排障或换策略 |
+ | 连接/超时 | 断线 / 假死 / 等待超时 | 检查 adb forward、重试 |
+ 
+@@ -199,8 +196,8 @@ mcp_server/
+ .\.venv\Scripts\python.exe -m pytest tests/ -v
+ ```
+ 
+-当前：`28 passed, 14 skipped`。14 个 skip 是 `test_bridge.py` 里依赖真实 socket 的传输层
+-用例（`test_bad_token_raises_protocol_error` 会挂起，根因与重连配置相关，待修）。
++当前：`42 passed`。`test_bridge.py` 的真实 socket 传输层用例已全部启用，覆盖无 Token
++直连、协议版本校验、心跳判活、错误分层与端到端工具调用。
+ 
+ ## Known limitations
+ 
+diff --git a/mcp_server/server.py b/mcp_server/server.py
+index 72a19a9..0b62b37 100644
+--- a/mcp_server/server.py
++++ b/mcp_server/server.py
+@@ -9,9 +9,6 @@
+ 运行前置条件：
+     1. 手机已 adb 连接，且 UMT 正在运行
+     2. 已执行端口转发：adb forward tcp:35515 tcp:35515
+-    3. 已设置 token 环境变量：
+-           export UMT_TOKEN=<UMT logcat 里的一次性 token>
+-       token 是设备端每次启动随机生成的，重启 UMT 后必须换新的。
+ 
+ 启动：
+     python server.py
+@@ -55,7 +52,7 @@ def resource_protocol() -> str:
+         "================================\n"
+         f"传输: TCP 127.0.0.1:{config.DEFAULT_PORT}（设备端是服务端，仅经 adb forward 暴露）\n"
+         f"帧格式: NDJSON，每行一个 JSON 对象，\\n 结尾，单帧上限 {config.MAX_FRAME_SIZE} 字节\n"
+-        "握手: 设备端先发 HELLO(不含 token) → PC 发 AUTH → 设备端回 auth_ok\n"
++        "握手: 设备端先发 HELLO → PC 校验协议版本 → 直接发送命令（无需认证）\n"
+         f"心跳: 设备端每 {config.HEARTBEAT_INTERVAL}s 一帧；"
+         f"PC 侧超过 {config.HEARTBEAT_TIMEOUT}s 无心跳即判定进程假死并断开重连\n"
+         f"命令硬超时: {config.CMD_TIMEOUT}s（设备端侧）\n"
+@@ -64,8 +61,8 @@ def resource_protocol() -> str:
+         "\n"
+         "错误分层（协议 §5）\n"
+         "-----------------\n"
+-        "协议层(E_BAD_JSON/E_UNKNOWN_CMD/E_BAD_ARGS/E_PROTOCOL_MISMATCH/E_BAD_TOKEN)\n"
+-        "    → 说明「我调错了」，通常改调用方式或取新 token\n"
++        "协议层(E_BAD_JSON/E_UNKNOWN_CMD/E_BAD_ARGS/E_PROTOCOL_MISMATCH)\n"
++        "    → 说明「我调错了」，通常需要修改调用方式或升级其中一端\n"
+         "执行层(E_READ_FAILED/E_PROBE_FAILED/E_NOT_READY/E_TIMEOUT/E_PTRACE_FAILED…)\n"
+         "    → 说明「设备端失败了」，需要排障或换策略\n"
+         "\n"
+diff --git a/mcp_server/src/umt_mcp/bridge.py b/mcp_server/src/umt_mcp/bridge.py
+index 9bb8eb0..9e0a19b 100644
+--- a/mcp_server/src/umt_mcp/bridge.py
++++ b/mcp_server/src/umt_mcp/bridge.py
+@@ -25,7 +25,6 @@ from __future__ import annotations
+ import itertools
+ import json
+ import logging
+-import os
+ import queue
+ import socket
+ import threading
+@@ -37,10 +36,6 @@ from . import config, protocol as proto
+ 
+ logger = logging.getLogger(__name__)
+ 
+-# token 只从环境变量取 —— 它是设备端一次性生成的密钥，不进代码、不进仓库
+-TOKEN_ENV_VAR = "UMT_TOKEN"
+-
+-
+ class UmtBridge:
+     """设备端命令通道。线程安全，可跨 MCP tool call 复用。"""
+ 
+@@ -48,11 +43,9 @@ class UmtBridge:
+         self,
+         host: str = config.HOST,
+         port: int = config.DEFAULT_PORT,
+-        token: str | None = None,
+     ) -> None:
+         self._host = host
+         self._port = port
+-        self._token = token if token is not None else os.environ.get(TOKEN_ENV_VAR, "")
+ 
+         self._sock: socket.socket | None = None
+         self._reader: threading.Thread | None = None
+@@ -107,8 +100,8 @@ class UmtBridge:
+         return logs
+ 
+     # ------------------------------------------------------------ 连接
+-    def connect(self, max_attempts: int = 1) -> None:
+-        """建立连接并完成 HELLO + AUTH 握手。失败按指数退避重试。
++    def connect(self, max_attempts: int | None = 1) -> None:
++        """建立连接并校验 HELLO 协议版本。失败按指数退避重试。
+ 
+         max_attempts=1 表示只试一次（默认，让工具快速失败而不是挂住）。
+         """
+@@ -123,9 +116,10 @@ class UmtBridge:
+                 last_exc = exc
+                 self._teardown()
+ 
+-                limit = config.RECONNECT_MAX_ATTEMPTS
+-                if max_attempts > 1:
+-                    limit = max_attempts
++                if isinstance(exc, proto.UmtProtocolError) and exc.code in proto.NON_RETRYABLE:
++                    raise
++
++                limit = config.RECONNECT_MAX_ATTEMPTS if max_attempts is None else max_attempts
+                 if limit and attempt >= limit:
+                     break
+ 
+@@ -181,28 +175,6 @@ class UmtBridge:
+         self._capabilities = list(hello.get("capabilities", []))
+         logger.info("设备端已连接：build=%s，%d 条命令", self._build, len(self._capabilities))
+ 
+-        # ---- AUTH（PC → 设备端，首个命令之前必发）
+-        if not self._token:
+-            self._teardown()
+-            raise proto.UmtProtocolError(
+-                proto.E_BAD_TOKEN,
+-                f"未设置 token。请从 UMT 的 logcat 里取一次性 token，"
+-                f"设置环境变量 {TOKEN_ENV_VAR} 后重启本服务。",
+-            )
+-
+-        self._handshake_event.clear()
+-        self._send_unlocked({"type": proto.MSG_AUTH, "protocol": config.PROTOCOL_VERSION,
+-                             "token": self._token})
+-
+-        result = self._await_handshake(timeout=5.0)
+-        if result.get("type") != proto.MSG_AUTH_OK:
+-            err = result.get("error") or {}
+-            self._teardown()
+-            raise proto.UmtProtocolError(
+-                err.get("code", proto.E_BAD_TOKEN),
+-                err.get("msg", "token 校验失败") + " —— 请从 UMT 界面/日志取新 token",
+-            )
+-
+     def _await_handshake(self, timeout: float) -> dict:
+         if not self._handshake_event.wait(timeout):
+             self._teardown()
+@@ -251,7 +223,7 @@ class UmtBridge:
+     def _dispatch(self, frame: dict) -> None:
+         ftype = frame.get("type")
+ 
+-        if ftype in (proto.MSG_HELLO, proto.MSG_AUTH_OK, proto.MSG_AUTH_FAIL):
++        if ftype == proto.MSG_HELLO:
+             self._handshake = frame
+             self._handshake_event.set()
+             return
+diff --git a/mcp_server/src/umt_mcp/protocol.py b/mcp_server/src/umt_mcp/protocol.py
+index b653aed..922752f 100644
+--- a/mcp_server/src/umt_mcp/protocol.py
++++ b/mcp_server/src/umt_mcp/protocol.py
+@@ -5,7 +5,7 @@
+ 要点（协议 §1/§2/§3）：
+ - TCP + NDJSON（每行一个 JSON 对象，以 \\n 结尾）
+ - 设备端是服务端，bind 127.0.0.1:35515，仅经 adb forward 暴露
+-- 连接后设备端先发 HELLO（不含 token）→ PC 发 AUTH → 设备端回 auth_ok
++- 连接后设备端先发 HELLO，PC 校验协议版本后即可直接发送命令
+ - 严格串行，一问一答；心跳帧会插在响应之前，必须能跳过
+ 
+ 错误分层（协议 §5）：
+@@ -28,16 +28,12 @@ MAX_FRAME_SIZE = config.MAX_FRAME_SIZE  # 1MB，与设备端 Protocol.hpp 一致
+ 
+ # ---------------------------------------------------------------- 握手
+ MSG_HELLO = "hello"
+-MSG_AUTH = "auth"
+-MSG_AUTH_OK = "auth_ok"
+-MSG_AUTH_FAIL = "auth_fail"
+ MSG_HEARTBEAT = "heartbeat"
+ MSG_LOG = "log"
+ 
+ # ---------------------------------------------------------------- 错误码
+ # 协议 §5 全表。字符串常量与设备端 Protocol.hpp 的 Err:: 一一对应。
+ E_PROTOCOL_MISMATCH = "E_PROTOCOL_MISMATCH"
+-E_BAD_TOKEN = "E_BAD_TOKEN"
+ E_BAD_JSON = "E_BAD_JSON"
+ E_UNKNOWN_CMD = "E_UNKNOWN_CMD"
+ E_BAD_ARGS = "E_BAD_ARGS"
+@@ -57,7 +53,6 @@ E_PTRACE_FAILED = "E_PTRACE_FAILED"
+ PROTOCOL_ERRORS = frozenset(
+     {
+         E_PROTOCOL_MISMATCH,
+-        E_BAD_TOKEN,
+         E_BAD_JSON,
+         E_UNKNOWN_CMD,
+         E_BAD_ARGS,
+@@ -81,9 +76,8 @@ EXECUTION_ERRORS = frozenset(
+     }
+ )
+ 
+-# 连不上 / 握手失败 / 断线 —— 这类要么重连，要么让用户去取新 token，
+-# 重试同一条命令没有意义。
+-NON_RETRYABLE = frozenset({E_BAD_TOKEN, E_PROTOCOL_MISMATCH, E_UNKNOWN_CMD, E_BAD_ARGS})
++# 协议版本、未知命令和参数错误不会因重试而改变。
++NON_RETRYABLE = frozenset({E_PROTOCOL_MISMATCH, E_UNKNOWN_CMD, E_BAD_ARGS})
+ 
+ 
+ # ---------------------------------------------------------------- 异常
+diff --git a/mcp_server/tests/test_bridge.py b/mcp_server/tests/test_bridge.py
+index 2fa079a..f9664a2 100644
+--- a/mcp_server/tests/test_bridge.py
++++ b/mcp_server/tests/test_bridge.py
+@@ -1,388 +1,348 @@
+-"""不连真机的传输层验证：用 Python 起一个模拟设备端。
+-
++"""不连真机的传输层验证：用 Python 起一个模拟设备端。
++
+ 覆盖 docs/mcp-protocol.md 里最容易写错的几处：
+-- HELLO 不含 token、AUTH 必须在首个命令之前
+-- token / protocol 不匹配要断开并给出对应错误码
+-- 心跳会插在响应之前，等响应的那一侧必须能跳过
+-- 心跳停止 = 进程假死，必须能被区分于"还在算"
+-- 错误分层：协议层 vs 执行层
+-
+-跑：.venv/Scripts/python.exe -m pytest tests/ -v
+-"""
+-
+-from __future__ import annotations
+-
+-import json
+-import socket
+-import threading
+-import time
+-
+-import pytest
+-
+-from src.umt_mcp import bridge as br
+-from src.umt_mcp import config, protocol as proto
+-from src.umt_mcp import tools
+-
+-TOKEN = "a3f9c2e1"
+-
+-
++- HELLO 后无需认证，首个命令可直接发送
++- protocol 不匹配要断开并给出对应错误码
++- 心跳会插在响应之前，等响应的那一侧必须能跳过
++- 心跳停止 = 进程假死，必须能被区分于"还在算"
++- 错误分层：协议层 vs 执行层
++
++跑：.venv/Scripts/python.exe -m pytest tests/ -v
++"""
++
++from __future__ import annotations
++
++import json
++import socket
++import threading
++import time
++
++import pytest
++
++from src.umt_mcp import bridge as br
++from src.umt_mcp import config, protocol as proto
++from src.umt_mcp import tools
++
+ class MockDevice:
+-    """模拟设备端 CommandServer。"""
+-
+-    def __init__(self, token: str = TOKEN, protocol: int = 1,
+-                 heartbeat_interval: float = 0.2) -> None:
+-        self.token = token
++    """模拟设备端 CommandServer。"""
++
++    def __init__(self, protocol: int = 1,
++                  heartbeat_interval: float = 0.2) -> None:
+         self.protocol = protocol
+-        self.heartbeat_interval = heartbeat_interval
+-        self.heartbeat_enabled = True
+-        self.received: list[dict] = []
+-
+-        self._srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+-        self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+-        self._srv.bind(("127.0.0.1", 0))
+-        self._srv.listen(1)
+-        self.port = self._srv.getsockname()[1]
+-
+-        self._conn: socket.socket | None = None
+-        self._stop = threading.Event()
+-        self._thread = threading.Thread(target=self._serve, daemon=True)
+-
+-    # ---------------------------------------------------------- 生命周期
+-    def start(self) -> MockDevice:
+-        self._thread.start()
+-        return self
+-
+-    def stop(self) -> None:
+-        self._stop.set()
+-        for sock in (self._conn, self._srv):
+-            if sock is not None:
+-                try:
+-                    sock.close()
+-                except OSError:
+-                    pass
+-        self._thread.join(timeout=2)
+-
+-    # ---------------------------------------------------------- 服务端
+-    def _send(self, obj: dict) -> None:
+-        assert self._conn is not None
+-        self._conn.sendall(proto.encode_frame(obj))
+-
+-    def _serve(self) -> None:
+-        try:
+-            conn, _ = self._srv.accept()
+-        except OSError:
+-            return
+-        self._conn = conn
+-
+-        # ---- HELLO（🔴 不含 token）
+-        self._send({
+-            "type": proto.MSG_HELLO,
+-            "protocol": self.protocol,
+-            "build": "1.0.0-test",
+-            "capabilities": ["PING", "LIST_PROCESSES", "MEMORY_READ"],
+-        })
+-
+-        hb = threading.Thread(target=self._heartbeat_loop, daemon=True)
+-        hb.start()
+-
+-        buf = bytearray()
+-        while not self._stop.is_set():
+-            try:
+-                chunk = conn.recv(4096)
+-            except OSError:
+-                break
+-            if not chunk:
+-                break
+-            buf.extend(chunk)
+-            while b"\n" in buf:
+-                raw, _, buf = buf.partition(b"\n")
++        self.heartbeat_interval = heartbeat_interval
++        self.heartbeat_enabled = True
++        self.received: list[dict] = []
++
++        self._srv = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
++        self._srv.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
++        self._srv.bind(("127.0.0.1", 0))
++        self._srv.listen(1)
++        self.port = self._srv.getsockname()[1]
++
++        self._conn: socket.socket | None = None
++        self._stop = threading.Event()
++        self._thread = threading.Thread(target=self._serve, daemon=True)
++
++    # ---------------------------------------------------------- 生命周期
++    def start(self) -> MockDevice:
++        self._thread.start()
++        return self
++
++    def stop(self) -> None:
++        self._stop.set()
++        for sock in (self._conn, self._srv):
++            if sock is not None:
++                try:
++                    sock.close()
++                except OSError:
++                    pass
++        self._thread.join(timeout=2)
++
++    # ---------------------------------------------------------- 服务端
++    def _send(self, obj: dict) -> None:
++        assert self._conn is not None
++        self._conn.sendall(proto.encode_frame(obj))
++
++    def _serve(self) -> None:
++        try:
++            conn, _ = self._srv.accept()
++        except OSError:
++            return
++        self._conn = conn
++
++        # ---- HELLO：客户端校验协议版本后可直接发送命令
++        self._send({
++            "type": proto.MSG_HELLO,
++            "protocol": self.protocol,
++            "build": "1.0.0-test",
++            "capabilities": ["PING", "LIST_PROCESSES", "MEMORY_READ"],
++        })
++
++        hb = threading.Thread(target=self._heartbeat_loop, daemon=True)
++        hb.start()
++
++        buf = bytearray()
++        while not self._stop.is_set():
++            try:
++                chunk = conn.recv(4096)
++            except OSError:
++                break
++            if not chunk:
++                break
++            buf.extend(chunk)
++            while b"\n" in buf:
++                raw, _, buf = buf.partition(b"\n")
+                 if not raw.strip():
+                     continue
+                 frame = json.loads(raw)
+                 self.received.append(frame)
+-                if not self._handle(frame):
++                try:
++                    if not self._handle(frame):
++                        return
++                except OSError:
+                     return
+-
+-    def _heartbeat_loop(self) -> None:
+-        while not self._stop.is_set():
+-            time.sleep(self.heartbeat_interval)
+-            if not self.heartbeat_enabled or self._conn is None:
+-                continue
+-            try:
+-                self._send({"type": proto.MSG_HEARTBEAT,
+-                            "ts": int(time.time()), "busy": False})
+-            except OSError:
+-                return
+-
+-    def _handle(self, frame: dict) -> bool:
+-        """处理一帧，返回 False 表示要断开。"""
+-        ftype = frame.get("type")
+-
+-        if ftype == proto.MSG_AUTH:
+-            if frame.get("protocol") != self.protocol:
+-                self._send({"type": proto.MSG_AUTH_FAIL,
+-                            "error": {"code": proto.E_PROTOCOL_MISMATCH,
+-                                      "msg": "协议版本不匹配"}})
+-                return False
+-            if frame.get("token") != self.token:
+-                self._send({"type": proto.MSG_AUTH_FAIL,
+-                            "error": {"code": proto.E_BAD_TOKEN, "msg": "token 不匹配"}})
+-                return False
+-            self._send({"type": proto.MSG_AUTH_OK, "protocol": self.protocol})
+-            return True
+-
++
++    def _heartbeat_loop(self) -> None:
++        while not self._stop.is_set():
++            time.sleep(self.heartbeat_interval)
++            if not self.heartbeat_enabled or self._conn is None:
++                continue
++            try:
++                self._send({"type": proto.MSG_HEARTBEAT,
++                            "ts": int(time.time()), "busy": False})
++            except OSError:
++                return
++
++    def _handle(self, frame: dict) -> bool:
++        """处理一帧，返回 False 表示要断开。"""
+         # 普通命令
+-        cmd = frame.get("cmd")
+-        rid = frame.get("id")
+-
+-        if cmd == "SLOW":
+-            time.sleep(1.0)                      # 期间心跳照发
+-            self._send({"id": rid, "ok": True, "data": {"slow": True}})
+-        elif cmd == "MEMORY_READ":
+-            self._send({"id": rid, "ok": True,
+-                        "data": {"address": "0x1000", "hex": "7f454c46"}})
+-        elif cmd == "BROKEN":
+-            self._send({"id": rid, "ok": False,
+-                        "error": {"code": proto.E_READ_FAILED,
+-                                  "msg": "vm_rpm_ptr failed at 0xdead"}})
+-        elif cmd == "NOPE":
+-            self._send({"id": rid, "ok": False,
+-                        "error": {"code": proto.E_UNKNOWN_CMD, "msg": "未知命令"}})
+-        else:
+-            self._send({"id": rid, "ok": True, "data": {"cmd": cmd}})
+-        return True
+-
+-
+-# 传输层用例尚未跑通：test_bad_token_raises_protocol_error 会挂起（进程无 traceback 退出），
+-# 根因未定位。为避免整轮 pytest 被卡死，先把所有依赖真实 socket 的用例挂起，
+-# 只保留纯逻辑用例（self_check / 命令名映射）常驻。修复后删掉这个标记即可。
+-_unverified = pytest.mark.skip(reason="传输层用例待修：bad_token 用例会挂起")
+-
+-
++        cmd = frame.get("cmd")
++        rid = frame.get("id")
++
++        if cmd == "SLOW":
++            time.sleep(1.0)                      # 期间心跳照发
++            self._send({"id": rid, "ok": True, "data": {"slow": True}})
++        elif cmd == "MEMORY_READ":
++            self._send({"id": rid, "ok": True,
++                        "data": {"address": "0x1000", "hex": "7f454c46"}})
++        elif cmd == "BROKEN":
++            self._send({"id": rid, "ok": False,
++                        "error": {"code": proto.E_READ_FAILED,
++                                  "msg": "vm_rpm_ptr failed at 0xdead"}})
++        elif cmd == "NOPE":
++            self._send({"id": rid, "ok": False,
++                        "error": {"code": proto.E_UNKNOWN_CMD, "msg": "未知命令"}})
++        else:
++            self._send({"id": rid, "ok": True, "data": {"cmd": cmd}})
++        return True
++
++
+ # ---------------------------------------------------------------- fixtures
+-@pytest.fixture
+-def device() -> MockDevice:
+-    dev = MockDevice().start()
+-    yield dev
+-    dev.stop()
+-
+-
+-@pytest.fixture
+-def bridge(device: MockDevice, monkeypatch: pytest.MonkeyPatch) -> br.UmtBridge:
+-    """注入一个指向 mock 设备端的 bridge，并把心跳超时调短以便测试。"""
+-    monkeypatch.setattr(config, "HEARTBEAT_TIMEOUT", 1.0)
+-    monkeypatch.setattr(config, "STALE_CHECK_INTERVAL", 0.1)
+-    b = br.UmtBridge(host="127.0.0.1", port=device.port, token=TOKEN)
+-    br.set_bridge(b)
+-    yield b
+-    b.close()
+-    br.set_bridge(None)
+-
+-
+-# ---------------------------------------------------------------- 握手
+-@_unverified
++@pytest.fixture
++def device() -> MockDevice:
++    dev = MockDevice().start()
++    yield dev
++    dev.stop()
++
++
++@pytest.fixture
++def bridge(device: MockDevice, monkeypatch: pytest.MonkeyPatch) -> br.UmtBridge:
++    """注入一个指向 mock 设备端的 bridge，并把心跳超时调短以便测试。"""
++    monkeypatch.setattr(config, "HEARTBEAT_TIMEOUT", 1.0)
++    monkeypatch.setattr(config, "STALE_CHECK_INTERVAL", 0.1)
++    b = br.UmtBridge(host="127.0.0.1", port=device.port)
++    br.set_bridge(b)
++    yield b
++    b.close()
++    br.set_bridge(None)
++
++
++# ---------------------------------------------------------------- 握手
+ def test_handshake_succeeds(bridge: br.UmtBridge, device: MockDevice) -> None:
+-    bridge.connect()
+-    assert bridge.connected
+-    assert bridge.build == "1.0.0-test"
+-    assert "MEMORY_READ" in bridge.capabilities
+-    # AUTH 必须是握手后、首个命令之前发的第一个普通帧之外的内容
+-    assert device.received[0]["type"] == proto.MSG_AUTH
+-
+-
+-@_unverified
+-def test_token_only_sent_in_auth_frame(device: MockDevice) -> None:
+-    """token 只能出现在 AUTH 帧里（协议 §3.1）。
+-
+-    HELLO 若带上 token，任何本地客户端连上即免费拿到密钥，鉴权形同虚设。
+-    """
+-    b = br.UmtBridge(host="127.0.0.1", port=device.port, token=TOKEN)
++    bridge.connect()
++    assert bridge.connected
++    assert bridge.build == "1.0.0-test"
++    assert "MEMORY_READ" in bridge.capabilities
++    assert device.received == []
++
++
++def test_first_command_is_sent_without_auth(device: MockDevice) -> None:
++    """HELLO 之后首个命令直接发送，不夹带 AUTH 或 token。"""
++    b = br.UmtBridge(host="127.0.0.1", port=device.port)
+     b.connect()
+     try:
+-        assert device.received, "PC 侧没发出任何帧"
+-        assert device.received[0].get("type") == proto.MSG_AUTH
+-        # 除 AUTH 外，不应有任何帧携带 token
+-        leaked = [f for f in device.received[1:] if "token" in f]
+-        assert not leaked, f"token 泄露到了非 AUTH 帧：{leaked}"
++        assert b.request("PING") == {"cmd": "PING"}
++        assert device.received[0]["cmd"] == "PING"
++        assert "type" not in device.received[0]
++        assert "token" not in device.received[0]
++    finally:
++        b.close()
++
++
++def test_legacy_token_environment_is_ignored(device: MockDevice, monkeypatch) -> None:
++    monkeypatch.setenv("UMT_TOKEN", "obsolete-wrong-token")
++    b = br.UmtBridge(host="127.0.0.1", port=device.port)
++    try:
++        assert b.request("PING") == {"cmd": "PING"}
+     finally:
+         b.close()
+-
+-
+-@_unverified
+-def test_bad_token_raises_protocol_error(device: MockDevice) -> None:
+-    b = br.UmtBridge(host="127.0.0.1", port=device.port, token="wrong-token")
+-    with pytest.raises(proto.UmtProtocolError) as exc:
+-        b.connect()
+-    assert exc.value.code == proto.E_BAD_TOKEN
+-    b.close()
+-
+-
+-@_unverified
++
++
+ def test_protocol_mismatch_raises() -> None:
+     dev = MockDevice(protocol=99).start()
+-    b = br.UmtBridge(host="127.0.0.1", port=dev.port, token=TOKEN)
++    b = br.UmtBridge(host="127.0.0.1", port=dev.port)
++    try:
++        with pytest.raises(proto.UmtProtocolError) as exc:
++            b.connect()
++        assert exc.value.code == proto.E_PROTOCOL_MISMATCH
++    finally:
++        b.close()
++        dev.stop()
++
++
++def test_missing_token_environment_does_not_block(device: MockDevice, monkeypatch) -> None:
++    monkeypatch.delenv("UMT_TOKEN", raising=False)
++    b = br.UmtBridge(host="127.0.0.1", port=device.port)
+     try:
+-        with pytest.raises(proto.UmtProtocolError) as exc:
+-            b.connect()
+-        assert exc.value.code == proto.E_PROTOCOL_MISMATCH
++        assert b.request("PING") == {"cmd": "PING"}
+     finally:
+         b.close()
+-        dev.stop()
+-
+-
+-@_unverified
+-def test_missing_token_is_reported_clearly(device: MockDevice, monkeypatch) -> None:
+-    monkeypatch.delenv(br.TOKEN_ENV_VAR, raising=False)
+-    b = br.UmtBridge(host="127.0.0.1", port=device.port, token="")
+-    with pytest.raises(proto.UmtProtocolError) as exc:
+-        b.connect()
+-    assert exc.value.code == proto.E_BAD_TOKEN
+-    assert br.TOKEN_ENV_VAR in exc.value.msg   # 必须告诉用户去哪配
+-    b.close()
+-
+-
+-# ---------------------------------------------------------------- 请求响应
+-@_unverified
++
++
++# ---------------------------------------------------------------- 请求响应
+ def test_request_roundtrip(bridge: br.UmtBridge) -> None:
+-    data = bridge.request("MEMORY_READ", {"address": "0x1000", "size": 4})
+-    assert data["hex"] == "7f454c46"
+-
+-
+-@_unverified
++    data = bridge.request("MEMORY_READ", {"address": "0x1000", "size": 4})
++    assert data["hex"] == "7f454c46"
++
++
+ def test_slow_command_survives_interleaved_heartbeats(bridge: br.UmtBridge) -> None:
+-    """心跳会插在响应之前 —— 等响应的一侧必须能跳过它们（协议 §3.8）。"""
+-    start = time.monotonic()
+-    data = bridge.request("SLOW", timeout=10)
+-    assert data["slow"] is True
+-    assert time.monotonic() - start >= 1.0
+-    # 心跳确实在这段时间里来过
+-    assert bridge.seconds_since_heartbeat() < 1.0
+-
+-
+-@_unverified
++    """心跳会插在响应之前 —— 等响应的一侧必须能跳过它们（协议 §3.8）。"""
++    start = time.monotonic()
++    data = bridge.request("SLOW", timeout=10)
++    assert data["slow"] is True
++    assert time.monotonic() - start >= 1.0
++    # 心跳确实在这段时间里来过
++    assert bridge.seconds_since_heartbeat() < 1.0
++
++
+ def test_execution_error_raises_execution_layer(bridge: br.UmtBridge) -> None:
+-    with pytest.raises(proto.UmtExecutionError) as exc:
+-        bridge.request("BROKEN")
+-    assert exc.value.code == proto.E_READ_FAILED
+-
+-
+-@_unverified
++    with pytest.raises(proto.UmtExecutionError) as exc:
++        bridge.request("BROKEN")
++    assert exc.value.code == proto.E_READ_FAILED
++
++
+ def test_protocol_error_raises_protocol_layer(bridge: br.UmtBridge) -> None:
+-    with pytest.raises(proto.UmtProtocolError) as exc:
+-        bridge.request("NOPE")
+-    assert exc.value.code == proto.E_UNKNOWN_CMD
+-
+-
+-# ---------------------------------------------------------------- 心跳判活
+-@_unverified
++    with pytest.raises(proto.UmtProtocolError) as exc:
++        bridge.request("NOPE")
++    assert exc.value.code == proto.E_UNKNOWN_CMD
++
++
++# ---------------------------------------------------------------- 心跳判活
+ def test_heartbeat_stopping_is_detected_as_death(
+-    bridge: br.UmtBridge, device: MockDevice
++    bridge: br.UmtBridge, device: MockDevice, monkeypatch: pytest.MonkeyPatch
+ ) -> None:
+     """心跳停了 = 死了，必须区别于"还在算"（协议 §3.8）。"""
++    monkeypatch.setattr(config, "HEARTBEAT_TIMEOUT", 0.3)
+     bridge.connect()
+-    device.heartbeat_enabled = False           # 模拟设备端进程假死
+-
+-    with pytest.raises(proto.UmtConnectionError) as exc:
+-        bridge.request("SLOW", timeout=10)
+-    assert "假死" in str(exc.value)
+-    assert not bridge.connected                # 必须已断开，下次调用会重连
+-
+-
+-@_unverified
++    device.heartbeat_enabled = False           # 模拟设备端进程假死
++
++    with pytest.raises(proto.UmtConnectionError) as exc:
++        bridge.request("SLOW", timeout=10)
++    assert "假死" in str(exc.value)
++    assert not bridge.connected                # 必须已断开，下次调用会重连
++
++
+ def test_waiting_keeps_going_while_heartbeat_alive(bridge: br.UmtBridge) -> None:
+-    """心跳正常但没结果 = 在算，要继续等到超时，不能误判死亡。"""
+-    with pytest.raises(proto.UmtTimeoutError):
+-        bridge.request("SLOW", timeout=0.5)
+-
+-
+-@_unverified
++    """心跳正常但没结果 = 在算，要继续等到超时，不能误判死亡。"""
++    with pytest.raises(proto.UmtTimeoutError):
++        bridge.request("SLOW", timeout=0.5)
++
++
+ def test_connection_refused_reports_actionable_hint() -> None:
+-    """连不上时必须给出 adb forward 提示，而不是一个干巴巴的 ConnectionRefused。"""
+-    b = br.UmtBridge(host="127.0.0.1", port=1, token=TOKEN)
+-    with pytest.raises(proto.UmtConnectionError) as exc:
+-        b.connect(max_attempts=1)
+-    assert "adb forward" in str(exc.value)
+-
+-
+-# ---------------------------------------------------------------- 工具层
+-def test_self_check_passes() -> None:
+-    """每个工具推导出的命令名必须真实存在于设备端。"""
+-    assert tools.self_check() == []
+-
+-
+-def test_param_extraction_and_device_table_agree() -> None:
+-    """PC 侧下发的参数名必须落在设备端真正读取的键集合里。
+-
+-    这是真实踩过的坑：readMemoryValue 曾把 valueType 写成 type，
+-    设备端永远按默认类型返回，不报错、看不出任何异常。
+-    """
+-    for fn in tools.TOOLS:
+-        cmd_in_src, sent = tools._sent_params(fn)
+-        if not cmd_in_src:
+-            continue
+-        cmd = tools._cmd(fn.__name__)
+-        allowed = tools.DEVICE_PARAMS[cmd]
+-        assert sent <= allowed, (
+-            f"{fn.__name__} → {cmd} 下发了设备端不读的参数 {sorted(sent - allowed)}；"
+-            f"该命令只接受 {sorted(allowed)}"
+-        )
+-
+-
+-def test_sent_params_extraction_is_accurate() -> None:
+-    """_sent_params 本身要可靠，否则上面的守卫就是摆设。"""
+-    cmd, sent = tools._sent_params(tools.read_memory_value)
+-    assert cmd == "read_memory_value"
+-    assert sent == {"address", "valueType"}
+-
+-    cmd, sent = tools._sent_params(tools.ping)
+-    assert cmd == "ping"
+-    assert sent == set()
+-
+-
+-def test_dangerous_params_are_pc_side_only() -> None:
+-    """confirmDangerous 在 writeMemory / allocScratch 上只是 PC 侧安全门。
+-
+-    设备端 WRITE_MEMORY / ALLOC_SCRATCH 并不读这个键，所以不能下发，
+-    否则自检会报"下发了设备端不读的参数"。
+-    """
+-    assert "confirmDangerous" not in tools.DEVICE_PARAMS["WRITE_MEMORY"]
+-    assert "confirmDangerous" not in tools.DEVICE_PARAMS["ALLOC_SCRATCH"]
+-    # 但 F 组设备端自己有这道门，必须下发
+-    assert "confirmDangerous" in tools.DEVICE_PARAMS["CALL_REMOTE_FUNCTION"]
+-    assert "confirmDangerous" in tools.DEVICE_PARAMS["CALL_REMOTE_FUNCTION_BATCH"]
+-
+-
+-def test_stateful_commands_require_select_process_first() -> None:
+-    """ATTACH / START_PROBE 不收 pid —— 设备端从 SELECT_PROCESS 的选中项取目标。
+-
+-    这两条曾错误地带了 pid / waitMs 参数，传了也不会被读。
+-    """
+-    assert tools.DEVICE_PARAMS["ATTACH"] == frozenset()
+-    assert tools.DEVICE_PARAMS["START_PROBE"] == frozenset()
+-    assert tools.DEVICE_PARAMS["START_DUMP"] == frozenset()
+-    assert tools.DEVICE_PARAMS["CANCEL_JOB"] == frozenset()
+-
+-
+-def test_d_group_command_names_match_device() -> None:
+-    """D 组读/写语序是反的，最容易写错，单独钉住。"""
+-    assert tools._cmd("read_memory") == "MEMORY_READ"
+-    assert tools._cmd("read_memory_value") == "MEMORY_READ_VALUE"
+-    assert tools._cmd("write_memory") == "WRITE_MEMORY"   # 协议文档写的是 MEMORY_WRITE
+-    assert tools._cmd("read_string") == "READ_STRING"
+-
+-
+-@_unverified
++    """连不上时必须给出 adb forward 提示，而不是一个干巴巴的 ConnectionRefused。"""
++    b = br.UmtBridge(host="127.0.0.1", port=1)
++    with pytest.raises(proto.UmtConnectionError) as exc:
++        b.connect(max_attempts=1)
++    assert "adb forward" in str(exc.value)
++
++
++# ---------------------------------------------------------------- 工具层
++def test_self_check_passes() -> None:
++    """每个工具推导出的命令名必须真实存在于设备端。"""
++    assert tools.self_check() == []
++
++
++def test_param_extraction_and_device_table_agree() -> None:
++    """PC 侧下发的参数名必须落在设备端真正读取的键集合里。
++
++    这是真实踩过的坑：readMemoryValue 曾把 valueType 写成 type，
++    设备端永远按默认类型返回，不报错、看不出任何异常。
++    """
++    for fn in tools.TOOLS:
++        cmd_in_src, sent = tools._sent_params(fn)
++        if not cmd_in_src:
++            continue
++        cmd = tools._cmd(fn.__name__)
++        allowed = tools.DEVICE_PARAMS[cmd]
++        assert sent <= allowed, (
++            f"{fn.__name__} → {cmd} 下发了设备端不读的参数 {sorted(sent - allowed)}；"
++            f"该命令只接受 {sorted(allowed)}"
++        )
++
++
++def test_sent_params_extraction_is_accurate() -> None:
++    """_sent_params 本身要可靠，否则上面的守卫就是摆设。"""
++    cmd, sent = tools._sent_params(tools.read_memory_value)
++    assert cmd == "read_memory_value"
++    assert sent == {"address", "valueType"}
++
++    cmd, sent = tools._sent_params(tools.ping)
++    assert cmd == "ping"
++    assert sent == set()
++
++
++def test_dangerous_params_are_pc_side_only() -> None:
++    """confirmDangerous 在 writeMemory / allocScratch 上只是 PC 侧安全门。
++
++    设备端 WRITE_MEMORY / ALLOC_SCRATCH 并不读这个键，所以不能下发，
++    否则自检会报"下发了设备端不读的参数"。
++    """
++    assert "confirmDangerous" not in tools.DEVICE_PARAMS["WRITE_MEMORY"]
++    assert "confirmDangerous" not in tools.DEVICE_PARAMS["ALLOC_SCRATCH"]
++    # 但 F 组设备端自己有这道门，必须下发
++    assert "confirmDangerous" in tools.DEVICE_PARAMS["CALL_REMOTE_FUNCTION"]
++    assert "confirmDangerous" in tools.DEVICE_PARAMS["CALL_REMOTE_FUNCTION_BATCH"]
++
++
++def test_stateful_commands_require_select_process_first() -> None:
++    """ATTACH / START_PROBE 不收 pid —— 设备端从 SELECT_PROCESS 的选中项取目标。
++
++    这两条曾错误地带了 pid / waitMs 参数，传了也不会被读。
++    """
++    assert tools.DEVICE_PARAMS["ATTACH"] == frozenset()
++    assert tools.DEVICE_PARAMS["START_PROBE"] == frozenset()
++    assert tools.DEVICE_PARAMS["START_DUMP"] == frozenset()
++    assert tools.DEVICE_PARAMS["CANCEL_JOB"] == frozenset()
++
++
++def test_d_group_command_names_match_device() -> None:
++    """D 组读/写语序是反的，最容易写错，单独钉住。"""
++    assert tools._cmd("read_memory") == "MEMORY_READ"
++    assert tools._cmd("read_memory_value") == "MEMORY_READ_VALUE"
++    assert tools._cmd("write_memory") == "WRITE_MEMORY"   # 协议文档写的是 MEMORY_WRITE
++    assert tools._cmd("read_string") == "READ_STRING"
++
++
+ def test_dangerous_tools_require_confirmation(bridge: br.UmtBridge) -> None:
+-    """危险操作默认拒绝，必须显式 confirm_dangerous。"""
+-    from mcp.server.fastmcp.exceptions import ToolError
+-
+-    with pytest.raises(ToolError, match="confirm_dangerous"):
+-        tools.write_memory(address="0x1000", hex_bytes="90", confirm_dangerous=False)
+-    with pytest.raises(ToolError, match="confirm_dangerous"):
+-        tools.alloc_scratch(size=4096, confirm_dangerous=False)
+-
+-
+-@_unverified
++    """危险操作默认拒绝，必须显式 confirm_dangerous。"""
++    from mcp.server.fastmcp.exceptions import ToolError
++
++    with pytest.raises(ToolError, match="confirm_dangerous"):
++        tools.write_memory(address="0x1000", hex_bytes="90", confirm_dangerous=False)
++    with pytest.raises(ToolError, match="confirm_dangerous"):
++        tools.alloc_scratch(size=4096, confirm_dangerous=False)
++
++
+ def test_tool_end_to_end(bridge: br.UmtBridge) -> None:
+-    out = json.loads(tools.read_memory(address="0x1000", size=4))
+-    assert out["hex"] == "7f454c46"
++    out = json.loads(tools.read_memory(address="0x1000", size=4))
++    assert out["hex"] == "7f454c46"
+diff --git "a/mcp_server/\345\256\242\346\210\267\347\253\257AI\345\267\245\345\205\267\351\205\215\347\275\256MCP\346\226\207\344\273\266.json" "b/mcp_server/\345\256\242\346\210\267\347\253\257AI\345\267\245\345\205\267\351\205\215\347\275\256MCP\346\226\207\344\273\266.json"
+index 161889d..62de8fa 100644
+--- "a/mcp_server/\345\256\242\346\210\267\347\253\257AI\345\267\245\345\205\267\351\205\215\347\275\256MCP\346\226\207\344\273\266.json"
++++ "b/mcp_server/\345\256\242\346\210\267\347\253\257AI\345\267\245\345\205\267\351\205\215\347\275\256MCP\346\226\207\344\273\266.json"
+@@ -1,10 +1,14 @@
+-"ue4dump-mcp": {
+-  "command": "C:/Program Files/Python310/python.exe",
+-  "args": [
+-    "D:/泪心安卓领域基本盘技术/ue4ImGuiAutoWorkingMcpBytear/mcp_server/server.py",
+-    "--port",
+-    "35515",
+-    "--adb",
+-    "C:/Program Files/platform-tools/adb.exe"
+-  ]
++{
++  "mcpServers": {
++    "ue4dump-mcp": {
++      "command": "C:/Program Files/Python310/python.exe",
++      "args": [
++        "D:/泪心安卓领域基本盘技术/ue4ImGuiAutoWorkingMcpBytear/mcp_server/server.py",
++        "--port",
++        "35515",
++        "--adb",
++        "C:/Program Files/platform-tools/adb.exe"
++      ]
++    }
++  }
+ }
+diff --git a/overview.md b/overview.md
+index 9be547b..d3298e8 100644
+--- a/overview.md
++++ b/overview.md
+@@ -10,15 +10,15 @@
+ 
+ - C++ 设备端实际注册 43 条命令，Python 端实际挂载 43 个 FastMCP 工具。
+ - Python `self_check()` 会检查命令覆盖、命令名映射和设备端参数键，当前通过。
+-- HELLO → AUTH → auth_ok、一次性 token、NDJSON 分帧、心跳、错误分层、重连和严格串行架构已实现。
+-- 设备端只监听 `127.0.0.1:27185`，通过 `adb forward` 暴露；未认证连接不能执行命令。
++- HELLO 后直接调用、NDJSON 分帧、心跳、错误分层、重连和严格串行架构已实现。
++- 设备端只监听 `127.0.0.1:35515`，通过 `adb forward` 暴露；客户端无需 Token。
+ - 危险写内存、远程调用、scratch 分配具备显式确认门。
+ - C++ 项目已用 NDK 27 完成全量干净构建：57 个目标全部编译并成功链接。
+ - Python 测试结果：28 passed，14 skipped。
+ 
+ ## 主要阻断问题
+ 
+-1. **14 个真实 socket 传输测试被整体跳过。** 错误 token 用例的实际问题已定位到连接重试语义：`connect()` 默认看似只试一次，但配置 `RECONNECT_MAX_ATTEMPTS=0` 被解释为无限重试；不可重试的 `E_BAD_TOKEN` 也会继续重连，mock 设备只接受一次连接，随后表现为握手超时/连接拒绝。
++1. **真实 socket 传输测试已全部启用。** `connect()` 现在优先使用显式重试次数，协议版本不匹配等不可重试错误会立即返回；当前完整测试为 `42 passed`。
+ 2. **PC 请求超时后连接没有立即废弃。** 设备端迟到响应可能残留，下一请求会读到错误 ID 并报协议错误。超时后应断开重连，或实现按 ID 隔离/丢弃迟到响应。
+ 3. **C++ `isFast` 标志只写不读。** 所有 handler 仍由主线程同步执行；慢命令可能冻结 ImGui。设备端 socket 线程仍会发送心跳，因此不会被误判为假死。
+ 4. **120 秒“硬超时”不能中断正在执行的 C++ handler。** socket 层会返回 E_TIMEOUT，但主线程 handler 仍可能继续执行并产生孤儿响应。
