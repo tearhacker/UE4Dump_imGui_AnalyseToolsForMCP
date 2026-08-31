@@ -54,6 +54,12 @@ static std::string GetLanIp();
 #include "UE/UEWrappers.hpp"
 #include <sys/mman.h>
 #include <cstdlib>
+#include <atomic>
+#include <fcntl.h>
+#include <unistd.h>
+#include <sys/select.h>
+#include <sys/time.h>
+#include <linux/input.h>
 
 #include <nlohmann/json.hpp>
 
@@ -3545,17 +3551,6 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
         return clicked;
     };
 
-    auto drawStatusChip = [](const char *label, const ImVec4 &color)
-    {
-        ImGui::PushStyleVar(ImGuiStyleVar_FrameRounding, 12.0f);
-        ImGui::PushStyleColor(ImGuiCol_Button, color);
-        ImGui::PushStyleColor(ImGuiCol_ButtonHovered, color);
-        ImGui::PushStyleColor(ImGuiCol_ButtonActive, color);
-        ImGui::Button(label);
-        ImGui::PopStyleColor(3);
-        ImGui::PopStyleVar();
-    };
-
     auto drawSectionHeader = [](const char *title, const char *subtitle)
     {
         ImGui::Text("%s", title);
@@ -4246,7 +4241,7 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
     ImGui::EndChild();
     ImGui::EndChild();
 
-    ImGui::PopStyleColor(11);
+    ImGui::PopStyleColor(12);
     ImGui::PopStyleVar(7);
 }
 
@@ -4277,6 +4272,108 @@ static std::string GetLanIp()
         pclose(fp);
     }
     return ip;
+}
+
+// ---- 音量键隐藏/显示菜单 ----
+// MemuSwitch: true=显示菜单, false=隐藏。默认显示，音量上=显示, 音量下=隐藏。
+// 若想默认隐藏(更隐蔽)，把下面的 {true} 改成 {false} 即可。
+static std::atomic<bool> MemuSwitch{true};
+static std::atomic<bool> volume_thread_running{false};
+static std::thread* volume_thread = nullptr;
+
+static int GetEventCount1() {
+    DIR *dir = opendir("/dev/input/");
+    if (!dir) return -1;
+    dirent *ptr = NULL;
+    int count = 0;
+    while ((ptr = readdir(dir)) != NULL) {
+        if (strstr(ptr->d_name, "event"))
+            count++;
+    }
+    closedir(dir);
+    return count ? count : -1;
+}
+
+// 音量键监听：音量+ 显示菜单，音量- 隐藏菜单
+void 音量隐藏菜单()
+{
+    if (volume_thread_running.load()) {
+        return;
+    }
+
+    volume_thread_running.store(true);
+    volume_thread = new std::thread([&] {
+        int EventCount = GetEventCount1();
+        if (EventCount < 0) {
+            printf("未找到输入设备\n");
+            volume_thread_running.store(false);
+            return;
+        }
+
+        std::unique_ptr<int[]> fdArray(new int[EventCount]);
+
+        for (int i = 0; i < EventCount; i++) {
+            char temp[128];
+            snprintf(temp, sizeof(temp), "/dev/input/event%d", i);
+            fdArray[i] = open(temp, O_RDWR | O_NONBLOCK);
+            if (fdArray[i] < 0) {
+                // 静默处理，不打印错误信息
+            }
+        }
+
+        input_event ev;
+        auto last_check_time = std::chrono::high_resolution_clock::now();
+        const auto check_interval = std::chrono::milliseconds(50); // 50ms检查一次，减少CPU占用
+
+        while (volume_thread_running.load()) {
+            auto current_time = std::chrono::high_resolution_clock::now();
+
+            if (current_time - last_check_time >= check_interval) {
+                for (int i = 0; i < EventCount; i++) {
+                    if (fdArray[i] < 0) continue;
+
+                    fd_set readfds;
+                    FD_ZERO(&readfds);
+                    FD_SET(fdArray[i], &readfds);
+                    struct timeval timeout = {0, 0}; // 立即返回
+
+                    if (select(fdArray[i] + 1, &readfds, nullptr, nullptr, &timeout) > 0) {
+                        if (read(fdArray[i], &ev, sizeof(ev)) > 0) {
+                            if (ev.type == EV_KEY &&
+                                (ev.code == KEY_VOLUMEUP || ev.code == KEY_VOLUMEDOWN)) {
+                                if (ev.code == KEY_VOLUMEUP && ev.value == 1) {       // 音量+ 按下
+                                    MemuSwitch.store(true);
+                                } else if (ev.code == KEY_VOLUMEDOWN && ev.value == 1) { // 音量- 按下
+                                    MemuSwitch.store(false);
+                                }
+                            }
+                        }
+                    }
+                }
+                last_check_time = current_time;
+            }
+
+            std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        }
+
+        for (int i = 0; i < EventCount; i++) {
+            if (fdArray[i] >= 0) close(fdArray[i]);
+        }
+
+        volume_thread_running.store(false);
+    });
+}
+
+// 退出时清理监听线程
+void 清理音量监听() {
+    if (volume_thread_running.load()) {
+        volume_thread_running.store(false);
+        if (volume_thread && volume_thread->joinable()) {
+            volume_thread->join();
+            delete volume_thread;
+            volume_thread = nullptr;
+        }
+    }
 }
 
 int main()
@@ -4338,6 +4435,9 @@ int main()
     Touch::setOrientation(displayInfo.orientation);
     ::init_My_drawdata();
 
+    // 启动音量键监听线程（音量+ 显示菜单 / 音量- 隐藏菜单）
+    音量隐藏菜单();
+
     bool flag = true;
     while (flag)
     {
@@ -4345,11 +4445,16 @@ int main()
         if (permeate_record == false)
             android::ANativeWindowCreator::ProcessMirrorDisplay();
         graphics->NewFrame();
-        Layout_tick_UI(&flag);
+        // 菜单默认显示；MemuSwitch=false 时跳过绘制即隐藏（窗口本身仍保持透明叠加）
+        if (MemuSwitch.load())
+            Layout_tick_UI(&flag);
         // MCP：每帧 poll 一次命令队列（主线程执行，保证与 UMT 全局状态串行）
         UmtMcp::CommandDispatcher::PollOnce();
         graphics->EndFrame();
     }
+
+    // 停止音量键监听线程并回收资源
+    清理音量监听();
 
     UmtMcp::CommandServer::Stop();
 
