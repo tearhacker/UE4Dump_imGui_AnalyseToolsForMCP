@@ -29,12 +29,12 @@ _CMD_ALIASES = {
     "write_memory": "WRITE_MEMORY",           # 🔴 协议文档写的是 MEMORY_WRITE
 }
 
-# 设备端实际注册的全部命令（src/executable.cpp SetupMcpCommands，43 条）。
+# 设备端实际注册的全部命令（src/executable.cpp SetupMcpCommands，45 条）。
 # 用作启动自检，防止工具名改动后静默发出不存在的命令名。
 DEVICE_COMMANDS = frozenset({
     "PING", "LIST_PROCESSES", "GET_LOGS", "GET_CAPABILITIES",
     "MEMORY_READ", "MEMORY_READ_VALUE", "READ_STRING", "LIST_MODULES",
-    "DECODE_ADRL", "WRITE_MEMORY", "SCAN_PATTERN", "DISASSEMBLE",
+    "DECODE_ADRL", "WRITE_MEMORY", "SCAN_PATTERN", "SEARCH_MEMORY", "FIND_REFERENCES", "DISASSEMBLE",
     "BEGIN_ATTACH_SESSION", "END_ATTACH_SESSION", "CALL_REMOTE_FUNCTION",
     "CALL_REMOTE_FUNCTION_BATCH", "ALLOC_SCRATCH",
     "SCAN_GNAMES", "SAMPLE_GNAMES", "SCAN_OBJECTS", "SAMPLE_OBJECTS",
@@ -45,6 +45,15 @@ DEVICE_COMMANDS = frozenset({
     "LOCATE_ENGINE_GLOBALS", "DUMP_SDK", "ANALYZE_CLASS", "SCAN_CANDIDATES",
     "LIST_OUTPUT_FILES", "READ_OUTPUT_FILE", "CANCEL_JOB", "APPLY_PROBE_OVERRIDES",
 })
+
+_RUNTIME_STATE: dict[str, Any] = {
+    "pid": None,
+    "processStartTime": None,
+    "mapRevision": None,
+    "searchSessions": [],
+    "candidateSessions": [],
+    "jobs": [],
+}
 
 
 def _cmd(func_name: str) -> str:
@@ -86,7 +95,53 @@ def _dev(tool_name: str, timeout: float | None = None, **args: Any) -> str:
     except (proto.UmtConnectionError, proto.UmtTimeoutError) as exc:
         raise ToolError(f"[连接/超时] {exc}") from exc
 
+    if cmd == "SELECT_PROCESS":
+        _RUNTIME_STATE.update(pid=data.get("pid") if isinstance(data, dict) else None,
+                              processStartTime=None, mapRevision=None,
+                              searchSessions=[], candidateSessions=[], jobs=[])
+    if isinstance(data, dict):
+        if data.get("pid") is not None:
+            _RUNTIME_STATE["pid"] = data["pid"]
+        if data.get("processStartTime") is not None:
+            _RUNTIME_STATE["processStartTime"] = data["processStartTime"]
+        if data.get("mapRevision"):
+            _RUNTIME_STATE["mapRevision"] = data["mapRevision"]
+        session_id = data.get("sessionId")
+        if session_id:
+            bucket = "candidateSessions" if cmd in {
+                "SCAN_GNAMES", "SAMPLE_GNAMES", "SCAN_OBJECTS", "SAMPLE_OBJECTS"
+            } else "searchSessions"
+            sessions = _RUNTIME_STATE[bucket]
+            if session_id not in sessions:
+                sessions.append(session_id)
+                del sessions[:-config.CANDIDATE_SESSION_LIMIT]
+        job_id = data.get("jobId")
+        if job_id and job_id not in _RUNTIME_STATE["jobs"]:
+            _RUNTIME_STATE["jobs"].append(job_id)
+            del _RUNTIME_STATE["jobs"][:-config.CANDIDATE_SESSION_LIMIT]
+        if cmd == "GET_DUMP_STATUS":
+            for job in data.get("jobs", []):
+                result = job.get("result") if isinstance(job, dict) else None
+                if not isinstance(result, dict):
+                    continue
+                if result.get("mapRevision"):
+                    _RUNTIME_STATE["mapRevision"] = result["mapRevision"]
+                session_id = result.get("sessionId")
+                if session_id:
+                    candidate_job = job.get("type") in {"scan_gnames", "scan_objects"}
+                    bucket = "candidateSessions" if candidate_job else "searchSessions"
+                    sessions = _RUNTIME_STATE[bucket]
+                    if session_id not in sessions:
+                        sessions.append(session_id)
+                        del sessions[:-config.CANDIDATE_SESSION_LIMIT]
+
     return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def runtime_state() -> dict[str, Any]:
+    """返回 PC 侧最近观察到的诊断运行态副本，供 MCP 资源摘要使用。"""
+    return {key: list(value) if isinstance(value, list) else value
+            for key, value in _RUNTIME_STATE.items()}
 
 
 # ============================================================ A 连接与能力
@@ -167,12 +222,13 @@ def get_dump_status() -> str:
     return _dev("get_dump_status")
 
 
-def dump_unreal_library() -> str:
+def dump_unreal_library(source: str | None = None) -> str:
     """单独转储 libUE4.so / libUnreal.so 本体。
 
     抓不到符号时用它拿原始 so，再在 PC 侧离线分析。
+    `source` 可选 AUTO / FILE / MEMORY。只要求 selectProcess + attach，Probe 失败后仍可用。
     """
-    return _dev("dump_unreal_library")
+    return _dev("dump_unreal_library", source=source)
 
 
 def dump_sdk(wait_ms: int | None = None) -> str:
@@ -215,13 +271,20 @@ def cancel_job() -> str:
     return _dev("cancel_job")
 
 
-def apply_probe_overrides(overrides: dict[str, str]) -> str:
-    """手动指定偏移地址，覆盖自动探测结果。
+def apply_probe_overrides(overrides: dict[str, Any], pid: int | None = None,
+                          map_revision: str | None = None,
+                          process_start_time: int | str | None = None,
+                          validate_before_apply: bool | None = None,
+                          ttl_seconds: int | None = None) -> str:
+    """把已验证候选及布局注入下一次 Probe。
 
-    key 为偏移名（如 "GNames"），value 为 "0x..." 字符串。
-    🔴 必须在 startProbe 之前调用。
+    overrides 支持兼容形式 {"names": "0x..."}，推荐传结构化 namesPtr /
+    guObjectArrayPtr / gWorldPtr，包含 address、semantics、layout、sessionId、candidateId。
+    pid 与 map_revision 用于拒绝进程切换或 maps 变化后的陈旧候选。
     """
-    return _dev("apply_probe_overrides", overrides=overrides)
+    return _dev("apply_probe_overrides", overrides=overrides, pid=pid,
+                mapRevision=map_revision, processStartTime=process_start_time,
+                validateBeforeApply=validate_before_apply, ttlSeconds=ttl_seconds)
 
 
 # ============================================================ D 内存原语
@@ -262,26 +325,86 @@ def write_memory(address: str, hex_bytes: str, confirm_dangerous: bool = False) 
     return _dev("write_memory", address=address, hex=hex_bytes)
 
 
-def scan_pattern(pattern: str, module: str | None = None,
-                 max_results: int | None = None) -> str:
+def scan_pattern(pattern: str | None = None, module: str | None = None,
+                 start: str | None = None, end: str | None = None,
+                 map_ids: list[str] | None = None,
+                 segment_permissions: list[str] | None = None,
+                 all_module_segments: bool | None = None,
+                 max_results: int | None = None, cursor: str | None = None,
+                 session_id: str | None = None,
+                 async_mode: bool | None = None) -> str:
     """按 IDA 风格 pattern 扫描内存（"FF DD ? 99 CC ? 00"）。
 
-    不指定 module 则扫整个目标进程。耗时较长。
+    map_ids、module、start/end 三种范围互斥。module 默认覆盖同路径全部可读段；
+    用返回的 sessionId + cursor 续页时不重扫。
     """
-    return _dev("scan_pattern", pattern=pattern, module=module, maxResults=max_results)
+    return _dev("scan_pattern", pattern=pattern, module=module, start=start, end=end,
+                mapIds=map_ids, segmentPermissions=segment_permissions,
+                allModuleSegments=all_module_segments, maxResults=max_results,
+                cursor=cursor, sessionId=session_id, **{"async": async_mode})
 
 
-def list_modules() -> str:
-    """列出目标进程已加载的模块（基址 / 大小 / 路径）。"""
-    return _dev("list_modules")
+def search_memory(query_type: str | None = None, query: str | None = None,
+                  module: str | None = None, map_ids: list[str] | None = None,
+                  start: str | None = None, end: str | None = None,
+                  alignment: int | None = None, permissions: list[str] | None = None,
+                  max_results: int | None = None, context_before: int | None = None,
+                  context_after: int | None = None, cursor: str | None = None,
+                  session_id: str | None = None,
+                  async_mode: bool | None = None) -> str:
+    """统一搜索 ASCII/UTF8/UTF16LE/HEX/U32/U64/POINTER。
+
+    初次调用传 query_type + query；分页续读只传 session_id + cursor 即可。
+    所有结果包含 mapId、moduleOffset、扫描统计和 maps revision。
+    """
+    return _dev("search_memory", queryType=query_type, query=query, module=module,
+                mapIds=map_ids, start=start, end=end, alignment=alignment,
+                permissions=permissions, maxResults=max_results,
+                contextBefore=context_before, contextAfter=context_after,
+                cursor=cursor, sessionId=session_id, **{"async": async_mode})
 
 
-def resolve_symbol(symbol: str) -> str:
+def find_references(target: str | None = None, module: str | None = None,
+                    map_ids: list[str] | None = None,
+                    start: str | None = None, end: str | None = None,
+                    kinds: list[str] | None = None,
+                    segment_permissions: list[str] | None = None,
+                    max_results: int | None = None,
+                    include_disassembly: bool | None = None,
+                    cursor: str | None = None,
+                    session_id: str | None = None,
+                    async_mode: bool | None = None) -> str:
+    """反向查找 POINTER / ADRP_ADD / ADRP_LDR / LITERAL_LOAD 引用。"""
+    return _dev("find_references", target=target, module=module, mapIds=map_ids,
+                start=start, end=end, kinds=kinds,
+                segmentPermissions=segment_permissions, maxResults=max_results,
+                includeDisassembly=include_disassembly, cursor=cursor,
+                sessionId=session_id, **{"async": async_mode})
+
+
+def list_modules(name_filter: str | None = None, include_segments: bool | None = None,
+                 include_anonymous: bool | None = None,
+                 permissions: list[str] | None = None,
+                 start: str | None = None, end: str | None = None,
+                 cursor: str | None = None,
+                 anonymous_cursor: str | None = None,
+                 limit: int | None = None) -> str:
+    """列出完整 maps 快照；同路径全部段保留，匿名映射可按需返回。"""
+    return _dev("list_modules", nameFilter=name_filter, includeSegments=include_segments,
+                includeAnonymous=include_anonymous, permissions=permissions,
+                start=start, end=end, cursor=cursor,
+                anonymousCursor=anonymous_cursor, limit=limit)
+
+
+def resolve_symbol(symbol: str, module: str | None = None,
+                   match: str | None = None, include_debug: bool | None = None,
+                   max_results: int | None = None) -> str:
     """按符号名解析地址。先查动态符号表，失败回退调试符号。
 
-    🔴 strip 过的 ELF 查不到符号，此时应回退 scanPattern。
+    只要求 attach。match 可用 EXACT / EXACT_THEN_FUZZY；strip ELF 回退 scanPattern。
     """
-    return _dev("resolve_symbol", symbol=symbol)
+    return _dev("resolve_symbol", symbol=symbol, module=module, match=match,
+                includeDebug=include_debug, maxResults=max_results)
 
 
 # ============================================================ E 理解层
@@ -304,32 +427,60 @@ def detect_ue_version() -> str:
     return _dev("detect_ue_version")
 
 
-def sample_gnames(start_index: int | None = None, count: int | None = None) -> str:
-    """抽样读 GNames/FNamePool 条目。快命令，先看样本再决定要不要全扫。"""
-    return _dev("sample_gnames", startIndex=start_index, count=count)
+def sample_gnames(source: str | None = None, session_id: str | None = None,
+                  candidate_id: int | None = None,
+                  start_index: int | None = None, count: int | None = None) -> str:
+    """从 ProbeResult 或候选 session 抽样 FNamePool 条目。"""
+    return _dev("sample_gnames", source=source, sessionId=session_id,
+                candidateId=candidate_id, startIndex=start_index, count=count)
 
 
-def scan_gnames() -> str:
-    """全量扫描 GNames。
+def scan_gnames(source: str | None = None, region: str | None = None,
+                map_ids: list[str] | None = None,
+                min_ptr: str | None = None, max_ptr: str | None = None,
+                anchor_names: list[str] | None = None,
+                anchor_offsets: list[int] | None = None,
+                layouts: list[dict[str, Any]] | None = None,
+                max_candidates: int | None = None,
+                max_scan_bytes: int | None = None,
+                cursor: str | None = None, limit: int | None = None,
+                session_id: str | None = None,
+                async_mode: bool | None = None) -> str:
+    """attach-only 扫描并评分 FNamePool 候选；Probe 成功时 AUTO 可直接回权威结果。"""
+    return _dev("scan_gnames", source=source, region=region, mapIds=map_ids,
+                minPtr=min_ptr, maxPtr=max_ptr,
+                anchorNames=anchor_names, anchorOffsets=anchor_offsets,
+                layouts=layouts, maxCandidates=max_candidates,
+                maxScanBytes=max_scan_bytes, cursor=cursor, limit=limit,
+                sessionId=session_id, **{"async": async_mode})
 
-    🔴 分钟级重活。当前设备端 isFast 未接线（见 docs/api/12 §5.3.1），
-    执行期间会冻结设备端 UI 与心跳，PC 侧可能因 10s 无心跳判定假死。
-    能用 sampleGnames 解决就别跑全扫。
-    """
-    return _dev("scan_gnames")
+
+def sample_objects(source: str | None = None, session_id: str | None = None,
+                   candidate_id: int | None = None,
+                   start_index: int | None = None, count: int | None = None) -> str:
+    """从 ProbeResult 或候选 session 抽样 GUObjectArray 对象。"""
+    return _dev("sample_objects", source=source, sessionId=session_id,
+                candidateId=candidate_id, startIndex=start_index, count=count)
 
 
-def sample_objects(start_index: int | None = None, count: int | None = None) -> str:
-    """抽样读 GUObjectArray 对象。快命令。"""
-    return _dev("sample_objects", startIndex=start_index, count=count)
-
-
-def scan_objects() -> str:
-    """全量扫描 GUObjectArray。
-
-    🔴 分钟级重活，同 scanGnames 的冻结风险。优先用 sampleObjects。
-    """
-    return _dev("scan_objects")
+def scan_objects(source: str | None = None,
+                 names_session_id: str | None = None,
+                 names_candidate_id: int | None = None,
+                 region: str | None = None, map_ids: list[str] | None = None,
+                 direction: str | None = None, origin: str | None = None,
+                 max_distance_bytes: int | None = None,
+                 layouts: list[dict[str, Any]] | None = None,
+                 max_candidates: int | None = None,
+                 cursor: str | None = None, limit: int | None = None,
+                 session_id: str | None = None,
+                 async_mode: bool | None = None) -> str:
+    """attach-only 结构预筛并评分 flat/chunked GUObjectArray 候选。"""
+    return _dev("scan_objects", source=source, namesSessionId=names_session_id,
+                namesCandidateId=names_candidate_id, region=region, mapIds=map_ids,
+                direction=direction, origin=origin,
+                maxDistanceBytes=max_distance_bytes, layouts=layouts,
+                maxCandidates=max_candidates, cursor=cursor, limit=limit,
+                sessionId=session_id, **{"async": async_mode})
 
 
 def search_classes(query: str, max_results: int | None = None) -> str:
@@ -354,9 +505,10 @@ def inspect_object(address: str) -> str:
 
 
 # ============================================================ H 高层用例
-def locate_engine_globals() -> str:
+def locate_engine_globals(wait_ms: int | None = None,
+                          async_mode: bool | None = None) -> str:
     """一站式定位引擎全局变量（GWorld / GEngine / GNames / GUObjectArray）。"""
-    return _dev("locate_engine_globals")
+    return _dev("locate_engine_globals", waitMs=wait_ms, **{"async": async_mode})
 
 
 def analyze_class(class_name: str) -> str:
@@ -471,7 +623,7 @@ TOOLS: list[Any] = [
     get_logs, list_output_files, read_output_file, cancel_job, apply_probe_overrides,
     # D
     read_memory, read_memory_value, read_string, write_memory,
-    scan_pattern, list_modules, resolve_symbol,
+    scan_pattern, search_memory, find_references, list_modules, resolve_symbol,
     # E
     decode_adrl, disassemble,
     # G
@@ -499,10 +651,20 @@ DEVICE_PARAMS: dict[str, frozenset[str]] = {
     "MEMORY_READ": frozenset({"address", "size"}),
     "MEMORY_READ_VALUE": frozenset({"address", "valueType"}),
     "READ_STRING": frozenset({"address", "maxLen", "isWide"}),
-    "LIST_MODULES": frozenset({"nameFilter"}),
+    "LIST_MODULES": frozenset({"nameFilter", "includeSegments", "includeAnonymous",
+                                "permissions", "start", "end", "cursor",
+                                "anonymousCursor", "limit"}),
     "DECODE_ADRL": frozenset({"address"}),
     "WRITE_MEMORY": frozenset({"address", "hex"}),
-    "SCAN_PATTERN": frozenset({"pattern", "module", "start", "end", "maxResults"}),
+    "SCAN_PATTERN": frozenset({"pattern", "module", "start", "end", "mapIds",
+                                "segmentPermissions", "allModuleSegments", "maxResults",
+                                "cursor", "sessionId", "async"}),
+    "SEARCH_MEMORY": frozenset({"queryType", "query", "module", "mapIds", "start", "end",
+                                "alignment", "permissions", "maxResults", "contextBefore",
+                                "contextAfter", "cursor", "sessionId", "async"}),
+    "FIND_REFERENCES": frozenset({"target", "module", "mapIds", "start", "end", "kinds",
+                                   "segmentPermissions", "maxResults", "includeDisassembly",
+                                   "cursor", "sessionId", "async"}),
     "DISASSEMBLE": frozenset({"address", "count"}),
     "BEGIN_ATTACH_SESSION": frozenset({"maxHoldMs"}),
     "END_ATTACH_SESSION": frozenset({"sessionId"}),
@@ -511,32 +673,37 @@ DEVICE_PARAMS: dict[str, frozenset[str]] = {
     "CALL_REMOTE_FUNCTION_BATCH": frozenset(
         {"confirmDangerous", "address", "argSets", "returnKind", "maxHoldMs", "trapAddress"}),
     "ALLOC_SCRATCH": frozenset({"size"}),
-    "SCAN_GNAMES": frozenset(),
-    "SAMPLE_GNAMES": frozenset({"startIndex", "count"}),
-    "SCAN_OBJECTS": frozenset(),
-    "SAMPLE_OBJECTS": frozenset({"startIndex", "count"}),
+    "SCAN_GNAMES": frozenset({"source", "region", "mapIds", "minPtr", "maxPtr",
+                               "anchorNames", "anchorOffsets", "layouts", "maxCandidates",
+                               "maxScanBytes", "cursor", "limit", "sessionId", "async"}),
+    "SAMPLE_GNAMES": frozenset({"source", "sessionId", "candidateId", "startIndex", "count"}),
+    "SCAN_OBJECTS": frozenset({"source", "namesSessionId", "namesCandidateId", "region",
+                                "mapIds", "direction", "origin", "maxDistanceBytes",
+                                "layouts", "maxCandidates", "cursor", "limit", "sessionId", "async"}),
+    "SAMPLE_OBJECTS": frozenset({"source", "sessionId", "candidateId", "startIndex", "count"}),
     "SEARCH_CLASSES": frozenset({"nameFilter", "maxResults", "caseSensitive"}),
     "DESCRIBE_CLASS": frozenset({"address", "name"}),
     "INSPECT_OBJECT": frozenset({"address"}),
-    "RESOLVE_SYMBOL": frozenset({"symbol"}),
+    "RESOLVE_SYMBOL": frozenset({"symbol", "module", "match", "includeDebug", "maxResults"}),
     "FOLLOW_POINTER_CHAIN": frozenset({"baseAddress", "offsets"}),
     "SELECT_PROCESS": frozenset({"pid", "package"}),
     "ATTACH": frozenset(),
     "START_PROBE": frozenset(),
     "DETECT_UE_VERSION": frozenset(),
     "START_DUMP": frozenset(),
-    "DUMP_UNREAL_LIBRARY": frozenset(),
+    "DUMP_UNREAL_LIBRARY": frozenset({"source"}),
     "GET_PROBE_RESULTS": frozenset(),
     "GET_PROBE_STATUS": frozenset(),
     "GET_DUMP_STATUS": frozenset(),
-    "LOCATE_ENGINE_GLOBALS": frozenset({"waitMs"}),
+    "LOCATE_ENGINE_GLOBALS": frozenset({"waitMs", "async"}),
     "DUMP_SDK": frozenset({"waitMs"}),
     "ANALYZE_CLASS": frozenset({"className", "includeRuntimeSample"}),
     "SCAN_CANDIDATES": frozenset({"region", "alignment", "maxCandidates"}),
     "LIST_OUTPUT_FILES": frozenset({"package"}),
     "READ_OUTPUT_FILE": frozenset({"filename", "package"}),
     "CANCEL_JOB": frozenset(),
-    "APPLY_PROBE_OVERRIDES": frozenset({"overrides"}),
+    "APPLY_PROBE_OVERRIDES": frozenset({"overrides", "pid", "mapRevision", "processStartTime",
+                                         "validateBeforeApply", "ttlSeconds"}),
 }
 
 

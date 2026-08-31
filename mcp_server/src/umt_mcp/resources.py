@@ -29,11 +29,18 @@ def get_process_info() -> str:
     bridge = get_bridge()
     if not bridge.connected:
         return "连接未建立。请先运行 ping 确认设备端在线。"
+    from src.umt_mcp import tools
+    runtime = tools.runtime_state()
     return (
         f"目标进程：未显式选中（设备端维护当前选中项）\n"
         f"设备端 build: {bridge.build}\n"
         f"能力集: {', '.join(bridge.capabilities)}\n"
-        f"心跳状态: {'正常' if bridge.seconds_since_heartbeat() < config.HEARTBEAT_TIMEOUT else '异常（可能假死）'}"
+        f"心跳状态: {'正常' if bridge.seconds_since_heartbeat() < config.HEARTBEAT_TIMEOUT else '异常（可能假死）'}\n"
+        f"最近 PID/start time: {runtime['pid'] or '尚未获取'} / {runtime['processStartTime'] or '尚未获取'}\n"
+        f"最近 maps revision: {runtime['mapRevision'] or '尚未获取'}\n"
+        f"搜索 session: {', '.join(runtime['searchSessions']) or '无'}\n"
+        f"候选 session: {', '.join(runtime['candidateSessions']) or '无'}\n"
+        f"任务 job: {', '.join(runtime['jobs']) or '无'}"
     )
 
 

@@ -162,6 +162,8 @@ PC 侧校验 protocol   ──不匹配──> 明确报错并 close()
 | `E_NOT_FOUND` | 符号 / 资源 / 进程未找到 | 执行失败 |
 | `E_DECODE_FAILED` | 指令解码失败（如 ADRL 解码无目标地址） | 执行失败 |
 | `E_PTRACE_FAILED` | ptrace attach/detach 失败，或远程调用异常（F 组）。含 ptrace 不可用 / 权限不足 / 目标进程已退出 / `mmap` 返回 `MAP_FAILED` | 执行失败 |
+| `E_MAP_STALE` | 调用绑定的 maps revision 已变化 | 执行失败，重新 `listModules` / 扫描 |
+| `E_SESSION_STALE` | 候选或搜索 session 已过期、进程已切换 | 执行失败，重新生成候选 |
 
 ### 错误分层（架构 §2.1 修正 2）
 
@@ -214,6 +216,8 @@ PC 侧校验 protocol   ──不匹配──> 明确报错并 close()
 | `writeMemory` | `MEMORY_WRITE` | 重（需校验映射可写） |
 | `readMemoryValue` | `MEMORY_READ_VALUE` | 快 |
 | `scanPattern` | `SCAN_PATTERN` | 重 |
+| `searchMemory` | `SEARCH_MEMORY` | 重 |
+| `findReferences` | `FIND_REFERENCES` | 重 |
 | `listModules` | `LIST_MODULES` | 快 |
 | `resolveSymbol` | `RESOLVE_SYMBOL` | 快（符号查找 O(1)） |
 | `readString` | `READ_STRING` | 快 |
@@ -271,7 +275,7 @@ PC 侧校验 protocol   ──不匹配──> 明确报错并 close()
 `PING` / `GET_CAPABILITIES` / `GET_LOGS` / `GET_PROBE_STATUS` / `GET_DUMP_STATUS` / `LIST_PROCESSES` / `MEMORY_READ`(size≤4096) / `LIST_OUTPUT_FILES` / `RESOLVE_SYMBOL` / `SAMPLE_*` / `DESCRIBE_CLASS` / `INSPECT_OBJECT` / `DECODE_ADRL` / `FOLLOW_POINTER_CHAIN` / `CANCEL_JOB` / `END_ATTACH_SESSION` / `READ_*`
 
 **重活**（投递 `gWorkerThread`）：
-`SCAN_GNAMES` / `SCAN_OBJECTS` / `SCAN_PATTERN` / `SCAN_CANDIDATES` / `START_PROBE` / `START_DUMP` / `DUMP_SDK` / `DUMP_UNREAL_LIBRARY` / `LOCATE_ENGINE_GLOBALS` / `ANALYZE_CLASS` / `SEARCH_CLASSES` / `SELECT_PROCESS` / `MEMORY_WRITE` / F 组（除 `END_ATTACH_SESSION`）
+`SCAN_GNAMES` / `SCAN_OBJECTS` / `SCAN_PATTERN` / `SEARCH_MEMORY` / `FIND_REFERENCES` / `SCAN_CANDIDATES` / `START_PROBE` / `START_DUMP` / `DUMP_SDK` / `DUMP_UNREAL_LIBRARY` / `LOCATE_ENGINE_GLOBALS` / `ANALYZE_CLASS` / `SEARCH_CLASSES` / `SELECT_PROCESS` / `MEMORY_WRITE` / F 组（除 `END_ATTACH_SESSION`）
 
 🔴 **不分级会怎样**：UMT 是单 worker 线程，分钟级扫描期间 `PING`/`GET_LOGS` 全部排队 → AI 误判掉线 → 触发重试风暴。
 
@@ -290,7 +294,23 @@ PC 侧校验 protocol   ──不匹配──> 明确报错并 close()
 | `brief` | false | — | 🔴 **响应分级**（见 §8.2），省 token |
 | `cursor` | 空 | — | 分页游标，续读上一页 |
 
-### 8.1 常量（超时与心跳）
+### 8.1 Attach-only 诊断与地址语义
+
+`LIST_MODULES`、`SCAN_PATTERN`、`SEARCH_MEMORY`、`FIND_REFERENCES`、
+`RESOLVE_SYMBOL`、`DUMP_UNREAL_LIBRARY`、候选模式的 `SCAN_GNAMES` /
+`SCAN_OBJECTS` 只要求 `SELECT_PROCESS + ATTACH`，不得检查 Probe success。
+
+全局变量响应统一区分：`slotAddress` 是模块内槽位，`valueAddress` 是槽位内容，
+`moduleOffset` 相对模块基址，`indirection` 是解引用层数。搜索和候选响应必须携带
+`mapRevision`；候选 session 与 `APPLY_PROBE_OVERRIDES` 的 revision 不一致时返回
+`E_MAP_STALE`，进程或 session 不一致时返回 `E_SESSION_STALE`。
+
+`processStartTime` 接受非负整数或十进制字符串；响应统一允许字符串表示，避免 64 位值
+经过 JSON 客户端时丢失精度。大范围扫描传 `async:true` 后立即返回 `jobId`，完成结果在
+`GET_DUMP_STATUS.jobs` 最新对应项的 `result` 中。设备端同一时间只运行一个 Probe、Dump
+或分析 job；并发启动、切换进程、重新 attach、注入 override 均返回 `E_NOT_READY`。
+
+### 8.2 常量（超时与心跳）
 
 | 常量 | 默认 | 含义 |
 |---|---|---|
@@ -299,7 +319,7 @@ PC 侧校验 protocol   ──不匹配──> 明确报错并 close()
 | `CMD_TIMEOUT` | 120s | 🔴 单命令硬超时上限，绝不无限执行 |
 | `RECONNECT_BASE/MAX` | 1s / 30s | 指数退避重连 |
 
-### 8.2 响应分级（`brief` 参数）—— 🔴 省 token 关键
+### 8.3 响应分级（`brief` 参数）—— 🔴 省 token 关键
 
 **问题**：同一份数据，AI 有时只要"有几个、大致是什么"，有时要逐条细节。
 全量返回 = 每次都烧满 token。
@@ -314,7 +334,7 @@ PC 侧校验 protocol   ──不匹配──> 明确报错并 close()
 **AI 用法**：先 `brief:true` 看全貌 → 判断有价值 → 再用 `cursor` 分页取细节。
 把"一次吃全"变成"先看后取"。
 
-### 8.3 数据通道：大文件绕开协议 🔴
+### 8.4 数据通道：大文件绕开协议 🔴
 
 **NDJSON 不适合传大文件**——hex 编码膨胀 2 倍，JSON 解析开销大，且会撑爆响应上限。
 
@@ -332,7 +352,7 @@ PC 侧校验 protocol   ──不匹配──> 明确报错并 close()
 🔴 **铁律**：**绝不把几十 MB 的 SDK 文件塞进协议**，也**绝不整文件读进上下文**
 （架构 §2.9 已定：大文件一律走服务端过滤）。
 
-### 8.4 流式分块（分块响应的帧格式）
+### 8.5 流式分块（分块响应的帧格式）
 
 当单个响应确实超过一帧容量时（如 `readOutputFile` 大块文本），分多帧返回：
 

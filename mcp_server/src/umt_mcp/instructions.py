@@ -28,14 +28,21 @@ INSTRUCTIONS = r"""\
 - 严格串行，一问一答；PC 侧自动排队
 - 心跳每 2 秒一帧；10 秒无心跳判假死并自动重连
 
-## 标准工作流（🔴 H 组优先）
+## 标准工作流（Probe 失败也必须继续）
 
 ```
-1. locateEngineGlobals          ← 一站式定位引擎全局（GNames/GUObjectArray/GWorld）
-   └─ 内部编排：detectUEVersion → resolveSymbol → scanPattern → scanGNames → scanObjects
-2. 若 locateEngineGlobals 失败 → 看 GET_LOGS 诊断
-3. analyzeClass <ClassName>     ← 分析单个类的字段语义（内部会 probe + dump）
+1. selectProcess → attach
+2. listModules(includeSegments=true, includeAnonymous=true)
+3. locateEngineGlobals(async_mode=true) → getDumpStatus 轮询对应 jobId
+4. 若只得到部分结果：searchMemory / findReferences → scanGNames → sampleGNames
+   → scanObjects → sampleObjects
+5. 把已验证候选连同 pid、processStartTime、mapRevision、layout、sessionId、candidateId 传给
+   applyProbeOverrides
+6. startProbe → getProbeStatus；成功后 dumpSdk
 ```
+
+`resolveSymbol`、`dumpUnrealLibrary`、完整 maps、通用搜索、引用搜索和候选扫描只依赖
+attach，不依赖 Probe success。任何阶段都保留前面已找到的部分结果。
 
 ## 细粒度工具分组（H 失败后再用）
 
@@ -44,7 +51,7 @@ INSTRUCTIONS = r"""\
 | A | 连通性 | `ping` `getCapabilities` |
 | B | 进程 | `listProcesses` `selectProcess` |
 | C | 流程 | `startProbe` `startDump` `dumpSdk` `getLogs` |
-| D | 内存原语 | `readMemory` `scanPattern` `resolveSymbol` `writeMemory` |
+| D | 内存原语 | `readMemory` `scanPattern` `searchMemory` `findReferences` `resolveSymbol` |
 | E | 反汇编 | `disassemble` `decodeAdrl` |
 | F | 远程调用 | `callRemoteFunctionBatch`（主推，无状态） |
 | G | 引擎语义 | `detectUEVersion` `sampleGNames` `sampleObjects` |
@@ -56,7 +63,7 @@ INSTRUCTIONS = r"""\
 1. **单工具响应 ≤ 4K token**
    - `readMemory` size 最大 4096
    - `getLogs` 默认 50 行（不是 200）
-   - 列表类工具支持 `brief=true` 先拿摘要，再分页取详情
+   - 列表/扫描类工具用 `cursor`/`limit` 分页，单页最多 20 项
 
 2. **禁止 "not found"**
    - 搜索类工具返回的是**次优候选 + 中性描述**，不要返回空
@@ -84,6 +91,21 @@ INSTRUCTIONS = r"""\
 8. **F 组远程调用首选 batch**
    - `callRemoteFunctionBatch` 是无状态原子操作，不会泄漏 attach 会话
    - 只有"调用→读内存→再调用"交错的场景才用 beginAttachSession
+
+9. **地址语义不得混用**
+   - `slotAddress` 是模块内全局槽位，`valueAddress` 是槽位内容
+   - `moduleOffset = slotAddress - moduleBase`
+   - `indirection` 明确解引用层数；GWorld 必须同时保留槽位和 worldObject
+
+10. **候选绑定**
+   - pid、processStartTime 或 mapRevision 改变后旧 session/override 失效
+   - E_MAP_STALE / E_SESSION_STALE 不是 Probe 失败，禁止继续回注旧地址
+
+11. **长扫描使用异步 job**
+   - `scanPattern`、`searchMemory`、`findReferences`、候选扫描和 `locateEngineGlobals`
+     在大范围运行时传 `async_mode=true`
+   - 首次调用立即返回 jobId；用 `getDumpStatus.jobs` 轮询，完成结果在最新 job 的 `result`
+   - 需要中止时调用 `cancelJob`；小范围扫描可不传 async_mode，直接同步返回
 
 ## 排障顺序
 

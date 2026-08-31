@@ -1,7 +1,7 @@
 # UMT MCP Server (PC-side)
 
-PC 侧 MCP 服务端：把 Android/C++ 设备端（UMT，Unreal Memory Tools）的 43 条原生命令
-通过 **43 个 MCP 工具**暴露给 AI agent，实现 UE4/UE5 内存读取、引擎探测、SDK 转储与
+PC 侧 MCP 服务端：把 Android/C++ 设备端（UMT，Unreal Memory Tools）的 45 条原生命令
+通过 **45 个 MCP 工具**暴露给 AI agent，实现 UE4/UE5 内存读取、引擎探测、SDK 转储与
 ptrace 远程调用。
 
 ## 当前实现状态
@@ -10,7 +10,7 @@ ptrace 远程调用。
 |---|---|
 | 服务版本 | `0.1.0` |
 | wire protocol | `1` |
-| MCP 工具 | `43` 个，`tools.self_check()` 返回空问题列表 |
+| MCP 工具 | `45` 个，`tools.self_check()` 返回空问题列表 |
 | MCP 资源 | `4` 个 |
 | 默认地址 | `127.0.0.1:35515` |
 | 认证 | 无 Token、无 AUTH；HELLO 版本校验后直接调用 |
@@ -35,7 +35,7 @@ src/umt_mcp/tools.py    工具 → 设备端命令名/参数键映射 + self_che
 src/umt_mcp/bridge.py   连接前自动 forward / HELLO / 心跳 / 重连 / 串行化
 src/umt_mcp/protocol.py 帧常量、错误码、协议层/执行层错误分层
    ▼  TCP + NDJSON（127.0.0.1:35515）
-设备端 CommandServer (C++, 只监听回环) → 43 条命令 → UMT 引擎语义层
+设备端 CommandServer (C++, 只监听回环) → 45 条命令 → UMT 引擎语义层
 ```
 
 ## 前置条件
@@ -57,7 +57,7 @@ mcp_server/
   src/umt_mcp/
     protocol.py           # wire protocol：帧常量 / 错误码全表 / 错误分层
     bridge.py             # 唯一碰 socket 的地方：握手/心跳/重连/RLock 串行
-    tools.py              # 43 个 MCP 工具 + DEVICE_PARAMS 参数契约 + self_check()
+    tools.py              # 45 个 MCP 工具 + DEVICE_PARAMS 参数契约 + self_check()
     instructions.py       # Server Instructions（工作流/铁律/排障顺序）
     resources.py          # 4 个资源：umt://protocol / capabilities / config / process
     adb.py                # adb 检测 + 自动端口转发 + 隧道自愈（线程安全、幂等）
@@ -131,7 +131,12 @@ Set-Location "D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\
 
 Windows 下 ADB 子进程使用 `CREATE_NO_WINDOW`，自动连接过程不会弹出命令窗口。
 
-## MCP 可用能力（43 个工具）
+大范围 `scanPattern` / `searchMemory` / `findReferences`、FNamePool/GUObjectArray 候选扫描和
+`locateEngineGlobals` 建议传 `async_mode=true`。设备端会立即返回 `jobId`，随后用
+`getDumpStatus` 查看 `jobs`；最新完成任务的分页结果在 `jobs[-1].result`，运行中可用
+`cancelJob` 中止。小范围查询保留同步模式。
+
+## MCP 可用能力（45 个工具）
 
 工具按 9 组分类；详细参数、默认值、示例见
 [`docs/MCP可用工具文档.md`](../docs/MCP可用工具文档.md)。
@@ -177,6 +182,8 @@ Windows 下 ADB 子进程使用 `CREATE_NO_WINDOW`，自动连接过程不会弹
 | `readString` | `READ_STRING` | 读字符串（wide=true 按 UTF-16/FString） |
 | `writeMemory` | `WRITE_MEMORY` | 写内存 🔴 需 confirm_dangerous=true |
 | `scanPattern` | `SCAN_PATTERN` | IDA 风格 pattern 扫描（重活） |
+| `searchMemory` | `SEARCH_MEMORY` | 字符串/数值/hex/指针统一搜索（重活） |
+| `findReferences` | `FIND_REFERENCES` | pointer 与 ARM64 引用反向搜索（重活） |
 | `listModules` | `LIST_MODULES` | 列出已加载模块 |
 | `resolveSymbol` | `RESOLVE_SYMBOL` | 符号名解析地址（strip 过的 ELF 会失败） |
 
@@ -266,7 +273,7 @@ Windows 下 ADB 子进程使用 `CREATE_NO_WINDOW`，自动连接过程不会弹
 - `test_adb.py`：自动转发新建、精确复用、强制刷新、相似端口排除、无在线设备。
 - `test_bridge.py`：连接前 forward、重连刷新、运行期端口、无 Token、HELLO、心跳、错误分层、mock 工具调用。
 - `test_protocol.py`：NDJSON 编解码、1 MB 帧上限、错误映射和配置常量。
-- `tools.self_check()`：43 个工具与 43 条设备命令一一覆盖，当前结果为 `[]`。
+- `tools.self_check()`：45 个工具与 45 条设备命令一一覆盖，当前结果为 `[]`。
 
 本次验证环境中 Python `3.10.5`、ADB `1.0.41` 可用；执行验证时没有在线 Android 设备，
 因此真机 forward 和设备命令调用仍需在手机连接、授权且 UMT 运行时完成。

@@ -1,10 +1,10 @@
 # UMT MCP 可用工具文档
 
-> 本文档覆盖本项目 MCP 服务端（`mcp_server`）当前**已注册并可调用**的全部 43 个 MCP 工具，
-> 与设备端（`Alltear_UnrealMemoryToolsNewMcp`）实际注册的 43 条命令一一对应。
+> 本文档覆盖本项目 MCP 服务端（`mcp_server`）当前**已注册并可调用**的全部 45 个 MCP 工具，
+> 与设备端（`Alltear_UnrealMemoryToolsNewMcp`）实际注册的 45 条命令一一对应。
 > 内容以 `mcp_server/src/umt_mcp/tools.py` 与设备端 `src/executable.cpp` 的真实实现为准。
 
-- 文档版本：1.0（2026-08-31）
+- 文档版本：1.1（2026-08-31）
 - 协议版本：1（`config.PROTOCOL_VERSION`）
 - 服务端：Python `FastMCP`（stdio），工具名对外为 **camelCase**
 - 设备端：Android/C++ 命令服务，`127.0.0.1:35515`，经 `adb forward` 暴露
@@ -92,9 +92,16 @@ args 中每个元素都是**字符串**：
 - `getLogs` 默认 50 行。
 - 大文件（几十 MB 的 SDK 产物）一律走 `adb pull`，**禁止**用 `readOutputFile` 整读进上下文。
 
+### 3.7 长任务与分页
+
+- 大范围 `scanPattern`、`searchMemory`、`findReferences`、候选扫描和 `locateEngineGlobals` 传 `async_mode=true`。
+- 工具立即返回 `jobId`；用 `getDumpStatus` 轮询 `jobs`，最新完成任务的结果位于 `jobs[-1].result`。
+- `cancelJob` 取消当前长任务。小范围扫描可省略 `async_mode`，同步返回。
+- 搜索、引用与候选 session 用 `cursor` 续页；设备端单页上限 20 项。
+
 ---
 
-## 4. 工具总表（43 个）
+## 4. 工具总表（45 个）
 
 | 分组 | MCP 工具名 | 设备端命令 | 一句话说明 |
 |---|---|---|---|
@@ -120,6 +127,8 @@ args 中每个元素都是**字符串**：
 | D 内存原语 | `readString` | `READ_STRING` | 读字符串（可 UTF-16） |
 | D 内存原语 | `writeMemory` | `WRITE_MEMORY` | 写内存 🔴 |
 | D 内存原语 | `scanPattern` | `SCAN_PATTERN` | IDA 风格 pattern 扫描 |
+| D 内存原语 | `searchMemory` | `SEARCH_MEMORY` | 按字符串、整数、指针或 HEX 统一搜索 |
+| D 内存原语 | `findReferences` | `FIND_REFERENCES` | 查找指针与 ARM64 指令引用 |
 | D 内存原语 | `listModules` | `LIST_MODULES` | 列出已加载模块 |
 | D 内存原语 | `resolveSymbol` | `RESOLVE_SYMBOL` | 符号名解析地址 |
 | E 理解层 | `decodeAdrl` | `DECODE_ADRL` | 解码 ADRP/ADR+LDR 序列 |
@@ -224,6 +233,8 @@ args 中每个元素都是**字符串**：
 { "tool": "getDumpStatus" }
 ```
 查询转储进度。`startDump` / `dumpSdk` 之后轮询。
+响应中的 `jobs` 给出 jobId、类型、进度和终态；`soDumpArtifact` 给出 SO 的设备路径、
+实际来源、`sizeBytes`、SHA-256 与 GNU build-id。
 
 #### dumpSdk
 ```json
@@ -234,9 +245,11 @@ args 中每个元素都是**字符串**：
 
 #### dumpUnrealLibrary
 ```json
-{ "tool": "dumpUnrealLibrary" }
+{ "tool": "dumpUnrealLibrary", "source": "AUTO" }
 ```
-单独转储 `libUE4.so` / `libUnreal.so` 本体。抓不到符号时用它拿原始 so，再在 PC 侧离线分析。
+- `source`：`AUTO` / `FILE` / `MEMORY`。只要求 selectProcess + attach，不依赖 Probe。
+单独转储 `libUE4.so` / `libUnreal.so` 本体，返回 jobId；完成后从 `getDumpStatus.soDumpArtifact`
+读取路径、大小、SHA-256、build-id 和实际采用的来源。
 
 #### getLogs
 ```json
@@ -272,10 +285,24 @@ args 中每个元素都是**字符串**：
 ```json
 {
   "tool": "applyProbeOverrides",
-  "overrides": { "GNames": "0x7a3b4000" }
+  "overrides": {
+    "namesPtr": {
+      "address": "0x7a3b4000",
+      "semantics": "POOL_BASE",
+      "layout": {},
+      "sessionId": "names-1",
+      "candidateId": 0
+    }
+  },
+  "pid": 12345,
+  "process_start_time": 987654,
+  "map_revision": "12345:abcd",
+  "validate_before_apply": true,
+  "ttl_seconds": 300
 }
 ```
-- `overrides`（必填 dict[str, str]）：key 为偏移名，value 为 `"0x..."` 字符串。
+- `overrides`（必填 dict）：兼容字符串地址；推荐结构化地址语义、完整 layout 和候选证据。
+- `pid`、`process_start_time`、`map_revision`（可选）：绑定当前进程实例和 maps 快照，拒绝陈旧候选；`process_start_time` 可传非负整数或设备原样返回的十进制字符串。
 手动指定偏移地址覆盖自动探测结果。🔴 必须在 `startProbe` 之前调用。
 
 ---
@@ -324,19 +351,50 @@ args 中每个元素都是**字符串**：
   "tool": "scanPattern",
   "pattern": "FF DD ? 99 CC ? 00",
   "module": "libUE4.so",
-  "maxResults": 100
+  "max_results": 100
 }
 ```
 - `pattern`（必填 str，IDA 风格，`?` 为通配）。
-- `module`（可选 str）：限定模块；不指定扫整个进程。
-- `maxResults`（可选 int）。
-🔴 耗时较长（可能扫最多 512MB）。
+- `map_ids`、`module`、`start` + `end` 三种范围来源互斥，初次扫描必须选择一种。
+- `segment_permissions`（可选 list[str]）：例如 `["r-x"]`。
+- `max_results`（可选 int）；返回 `sessionId` 与 `cursor` 后可直接续页，不会重扫。
+🔴 耗时较长。扫描会跨读块匹配，并返回 `scannedBytes`、`skippedBytes`、`readErrors` 与 maps revision。
+
+#### searchMemory
+```json
+{
+  "tool": "searchMemory",
+  "query_type": "POINTER",
+  "query": "0x71000000",
+  "module": "libUE4.so",
+  "permissions": ["rw-"],
+  "context_before": 8,
+  "context_after": 16
+}
+```
+- `query_type`：`ASCII` / `UTF8` / `UTF16LE` / `HEX` / `U32` / `U64` / `POINTER`。
+- `map_ids`、`module`、`start` + `end` 三种范围来源互斥；未指定时扫描全部可读映射。
+- `alignment`（可选 int）：限制结果地址对齐；`context_before` / `context_after` 返回命中上下文。
+- 返回 `sessionId`、`cursor`、`mapRevision` 与命中所在 `mapId` / `moduleOffset`；续页只需传 session 与 cursor。
+
+#### findReferences
+```json
+{
+  "tool": "findReferences",
+  "target": "0x71000000",
+  "module": "libUE4.so",
+  "kinds": ["POINTER", "ADRP_ADD", "ADRP_LDR", "LITERAL_LOAD"],
+  "include_disassembly": true
+}
+```
+查找直接指针与 ARM64 `ADRP+ADD`、`ADRP+LDR`、literal load 引用。范围参数与 `searchMemory` 一致；每项返回指令地址、解析目标、映射/模块偏移和可选反汇编上下文。
 
 #### listModules
 ```json
-{ "tool": "listModules" }
+{ "tool": "listModules", "include_segments": true, "include_anonymous": true, "limit": 20 }
 ```
-列出目标进程已加载的模块（基址 / 大小 / 路径）。
+保留同一路径全部真实映射段，并返回稳定 mapId、fileOffset、device、inode、权限、
+processStartTime 和 mapRevision。模块与匿名映射分别用 `cursor` / `anonymous_cursor` 续页。
 
 #### resolveSymbol
 ```json
@@ -382,11 +440,10 @@ args 中每个元素都是**字符串**：
 
 #### scanGnames
 ```json
-{ "tool": "scanGnames" }
+{ "tool": "scanGnames", "source": "CANDIDATE", "region": "ELF_SEGMENTS", "async_mode": true }
 ```
-全量扫描 GNames。
-- 🔴 重活。当前设备端 isFast 分级未接线，执行期间可能冻结设备端 UI；PC 侧 10s 无心跳会判定假死断开。
-- 能用 `sampleGnames` 解决就别跑全扫。
+attach-only 结构扫描 FNamePool，逐布局返回候选评分、证据、失败检查、pool/slot 地址与 session。
+用 cursor/limit 续页；大范围扫描异步运行时 UI 和 MCP 状态轮询保持可用。
 
 #### sampleObjects
 ```json
@@ -396,9 +453,10 @@ args 中每个元素都是**字符串**：
 
 #### scanObjects
 ```json
-{ "tool": "scanObjects" }
+{ "tool": "scanObjects", "source": "CANDIDATE", "region": "MODULE_RW", "async_mode": true }
 ```
-全量扫描 GUObjectArray。🔴 重活，冻结风险同 `scanGnames`，优先 `sampleObjects`。
+结构预筛 flat/chunked GUObjectArray，返回评分、证据、失败检查和候选 session。可传
+`names_session_id` + `names_candidate_id` 增强名字评分；使用 cursor/limit 续页。
 
 #### searchClasses
 ```json
@@ -427,9 +485,10 @@ args 中每个元素都是**字符串**：
 
 #### locateEngineGlobals
 ```json
-{ "tool": "locateEngineGlobals" }
+{ "tool": "locateEngineGlobals", "async_mode": true }
 ```
-一站式定位引擎全局变量（GWorld / GEngine / GNames / GUObjectArray）。多步编排，较慢。
+一站式定位 FNamePool / GUObjectArray / GWorld。保留部分结果；GWorld 同时返回全局槽位、
+world 对象、稳定性与类校验。多步编排建议异步运行。
 
 #### analyzeClass
 ```json

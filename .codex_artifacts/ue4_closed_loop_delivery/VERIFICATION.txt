@@ -1,0 +1,102 @@
+UE4 MCP CLOSED-LOOP DELIVERY VERIFICATION
+Generated: 2026-08-31 Asia/Shanghai
+
+CHANGED BRANCH / FIELDS
+Branch: main @ 0a3bebd
+Fields/contracts: processStartTime, mapRevision, mapId, sessionId, candidateId,
+layout, slotAddress, valueAddress, moduleOffset, indirection, jobId, result,
+soDumpArtifact, fieldSources, overrideEvidence.
+
+ARTIFACT PATHS
+MODIFIED_FILE: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\ue4_closed_loop_delivery\MODIFIED_FILE.zip
+DIFF_FILE: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\ue4_closed_loop_delivery\DIFF_FILE.patch
+VERIFICATION: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\ue4_closed_loop_delivery\VERIFICATION.txt
+ROLLBACK: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\ue4_closed_loop_delivery\ROLLBACK.sh
+
+ORIGINAL SHA256 (captured before modification)
+3B90DCD2B4391DBF291CD2EA1693AA075E942385576A69A85A89084D547ED6BF  Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp
+6DE4B6D2AC7BFBABA3D4CFCB85A7D38FBCC1FFD87A517B9E89C2ED3395B0ADCF  mcp_server/src/umt_mcp/tools.py
+32D0C24919386B5863A279BDEBBD1CD395C73667B2E9FD6808FF9705E60C818A  mcp_server/src/umt_mcp/protocol.py
+CD0203E832EB8A4C56BB4305D994C8F445509646C886011138080E326CCE1083  docs/MCP逆向分析UE4引擎需补充能力.md (reconstructed original fixture)
+
+MODIFIED SHA256
+9017BF1D87278DF46AE3A2C6D5FAEC44AF089723ADE58659B2BF15402DA229FB  Alltear_UnrealMemoryToolsNewMcp/src/executable.cpp
+EA1FDBB0B5B9CFB5E6C0DF28D4112B3956FB3D9F33D9229F39945380B160F550  mcp_server/src/umt_mcp/tools.py
+C8938E235BA671B2A09B6582178892C667D2ED35C1E8A02320491E9FEFFBD4B6  mcp_server/src/umt_mcp/protocol.py
+A62D76CBF8E29139D2BD66303F591E29EC5C2DFE702EECBBC491F1808A3487D7  docs/MCP逆向分析UE4引擎需补充能力.md
+3B3DA3326CE49A624B5144329D0780F477B3D5BCD79A724171B6918FE5C63AAC  outputs/arm64-v8a/UnrealMemoryTools
+
+BASELINE
+Command: D:\...\mcp_server\.venv\Scripts\python.exe -m pytest -q
+Working directory: ...\.codex_artifacts\ue4_closed_loop_delivery_work\rollback_test\mcp_server
+Input: HEAD source plus reconstructed original design document, after rollback.
+Literal output/result:
+...................................................                      [100%]
+51 passed in 5.60s
+Exit status: 0
+
+Command: cmake -S Alltear_UnrealMemoryToolsNewMcp -B build_baseline -G Ninja -DNDK_PATH=D:/ProgramerDevelop/windowsNDK27 -DCMAKE_MAKE_PROGRAM=D:/ProgramerDevelop/VS2026/SDK/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe
+Input: rolled-back Android/C++ source.
+Literal output/result: -- Configuring done; -- Generating done; Build files written to build_baseline
+Exit status: 0
+Command: cmake --build build_baseline --parallel
+Literal output/result: [57/57] Linking CXX executable ...\rollback_test\Alltear_UnrealMemoryToolsNewMcp\outputs\arm64-v8a\UnrealMemoryTools
+Exit status: 0
+
+MODIFIED
+Command: D:\...\mcp_server\.venv\Scripts\python.exe -m pytest -q
+Working directory: D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\mcp_server
+Input: current modified Python MCP client/server contract.
+Literal output/result:
+.............................................................            [100%]
+61 passed in 5.70s
+Exit status: 0
+
+Command: .\.venv\Scripts\python.exe -c "from src.umt_mcp import tools; print(f'tools={len(tools.TOOLS)} commands={len(tools.DEVICE_COMMANDS)}'); print(tools.self_check())"
+Input: current tool and device-command registries.
+Literal output/result:
+tools=45 commands=45
+[]
+Exit status: 0
+
+Command: cmake -S Alltear_UnrealMemoryToolsNewMcp -B .codex_artifacts/ue4_closed_loop_delivery_work/build_modified -G Ninja -DNDK_PATH=D:/ProgramerDevelop/windowsNDK27 -DCMAKE_MAKE_PROGRAM=D:/ProgramerDevelop/VS2026/SDK/Common7/IDE/CommonExtensions/Microsoft/CMake/Ninja/ninja.exe
+Input: current modified Android/C++ source.
+Literal output/result: -- Configuring done; -- Generating done; Build files written to build_modified
+Exit status: 0
+Command: cmake --build .codex_artifacts/ue4_closed_loop_delivery_work/build_modified --parallel
+Literal output/result: [60/60] Linking CXX executable D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\Alltear_UnrealMemoryToolsNewMcp\outputs\arm64-v8a\UnrealMemoryTools
+Exit status: 0
+
+Command: git diff --check -- Alltear_UnrealMemoryToolsNewMcp mcp_server docs/MCP可用工具文档.md docs/mcp-protocol.md
+Input: current scoped patch.
+Literal output/result: no whitespace errors (only core.autocrlf informational warnings).
+Exit status: 0
+
+ROLLBACK
+Command: D:\ProgramerDevelop\Git\bin\bash.exe D:\...\.codex_artifacts\ue4_closed_loop_delivery\ROLLBACK.sh D:\...\.codex_artifacts\ue4_closed_loop_delivery_work\rollback_test
+Input: separate clone after DIFF_FILE.patch was applied; modified test result was 61 passed in 5.73s.
+Literal output/result:
+ROLLBACK_OK: restored baseline in D:\泪心安卓领域基本盘技术\ue4ImGuiAutoWorkingMcpBytear\.codex_artifacts\ue4_closed_loop_delivery_work\rollback_test
+Exit status: 0
+
+Restored behavior/status:
+- Python suite returned to 51 passed in 5.60s, exit 0.
+- git diff --exit-code for all tracked delivery paths returned exit 0.
+- git apply --check DIFF_FILE.patch returned exit 0 after rollback, proving forward re-apply is possible.
+- executable.cpp and protocol.py normalized SHA256 returned to their captured originals.
+- reconstructed design document normalized SHA256 returned to CD0203E832EB8A4C56BB4305D994C8F445509646C886011138080E326CCE1083.
+- Raw filesystem SHA256 can differ in the clone under core.autocrlf; Git content and behavior are restored.
+- Main workspace was not rolled back and remains modified.
+
+DEVICE AVAILABILITY
+Command: adb devices -l
+Input: locally connected Android devices.
+Literal output/result:
+List of devices attached
+Exit status: 0
+Result: no device serial was listed, so deployment and live process probing were not executed in this run.
+
+ARTIFACT SHA256
+A7F1CD835BC34074B2A58AC28F74C0D5BC6BC2EF653FDE96350659DBEC4A962A  DIFF_FILE.patch
+8D154F3B4215413062A37910C1A87DFDFBD6689AC7298B283C508BCA7D9EEBB7  MODIFIED_FILE.zip
+8A94BB4E85F6542C759B0C63246F3BD570059428674E0F52C215D9A265F3E4E4  ROLLBACK.sh

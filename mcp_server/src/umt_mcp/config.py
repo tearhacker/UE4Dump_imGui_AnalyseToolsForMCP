@@ -43,6 +43,9 @@ MAX_RESPONSE_TOKENS = 4_096
 READ_MEMORY_MAX_SIZE = 4_096    # readMemory size 上限（原 65536 会打出 33K token）
 GET_LOGS_DEFAULT_LINES = 50     # getLogs 默认行数（原 200 ≈ 6K token）
 SCAN_DEFAULT_CANDIDATES = 50    # scanCandidates 默认候选数
+SCAN_PAGE_RESULTS = 20          # 扫描单页上限，保证上下文/证据不撑爆 4K token
+SCAN_DEFAULT_BUDGET = 64 * 1024 * 1024
+CANDIDATE_SESSION_LIMIT = 32
 
 # ---------------------------------------------------------------- 工具预算（v1.2 issue #6）
 MAX_TOOLS = 45                  # 硬上限

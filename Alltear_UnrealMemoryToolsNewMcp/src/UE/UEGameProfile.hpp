@@ -22,17 +22,46 @@ enum class PATTERN_MAP_TYPE : int8_t
     BSS,  // Search in .bss maps
 };
 
+struct UEAddressOverrides
+{
+    uintptr_t namesPtr = 0;
+    uintptr_t guObjectArrayPtr = 0;
+    bool hasNamesPtr = false;
+    bool hasGUObjectArrayPtr = false;
+    bool hasNameLayout = false;
+    bool hasObjectLayout = false;
+
+    uintptr_t nameStride = 0;
+    uintptr_t nameBlocksBit = 0;
+    uintptr_t nameBlocksOff = 0;
+    uintptr_t nameHeaderOff = 0;
+    uintptr_t nameLengthShift = 0;
+    uintptr_t objObjectsOff = 0;
+    uintptr_t objectsOff = 0;
+    uintptr_t numElementsOff = 0;
+    uintptr_t numElementsPerChunk = 0;
+    uintptr_t itemObjectOff = 0;
+    uintptr_t itemSize = 0;
+    uintptr_t classPrivateOff = 0;
+    uintptr_t namePrivateOff = 0;
+    uintptr_t outerPrivateOff = 0;
+};
+
 class IGameProfile
 {
 public:
 protected:
     UEVars _UEVars;
+    UEAddressOverrides _addressOverrides;
+    UE_Offsets _baseOffsetsBackup;
+    bool _hasOffsetsBackup = false;
 
 public:
     virtual ~IGameProfile() = default;
 
     UEVarsInitStatus InitUEVars();
     const UEVars *GetUEVars() const { return &_UEVars; }
+    void SetAddressOverrides(const UEAddressOverrides &overrides);
 
     virtual ElfScanner GetUnrealELF() const;
 

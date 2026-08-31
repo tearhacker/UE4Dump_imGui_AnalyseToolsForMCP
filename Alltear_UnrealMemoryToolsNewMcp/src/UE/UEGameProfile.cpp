@@ -11,6 +11,24 @@
 
 using namespace UEMemory;
 
+void IGameProfile::SetAddressOverrides(const UEAddressOverrides &overrides)
+{
+    UE_Offsets *offsets = GetOffsets();
+    if (offsets)
+    {
+        if (!_hasOffsetsBackup)
+        {
+            _baseOffsetsBackup = *offsets;
+            _hasOffsetsBackup = true;
+        }
+        else
+        {
+            *offsets = _baseOffsetsBackup;
+        }
+    }
+    _addressOverrides = overrides;
+}
+
 namespace
 {
     constexpr uintptr_t kArm64PageSize = 0x1000;
@@ -691,7 +709,32 @@ UEVarsInitStatus IGameProfile::InitUEVars()
 
     _UEVars.Offsets = pOffsets;
 
-    _UEVars.NamesPtr = GetNamesPtr();
+    if (_addressOverrides.hasNameLayout)
+    {
+        pOffsets->FNamePool.Stride = _addressOverrides.nameStride;
+        pOffsets->FNamePool.BlocksBit = _addressOverrides.nameBlocksBit;
+        pOffsets->FNamePool.BlocksOff = _addressOverrides.nameBlocksOff;
+        pOffsets->FNamePoolEntry.Header = _addressOverrides.nameHeaderOff;
+        const uintptr_t lengthShift = _addressOverrides.nameLengthShift;
+        pOffsets->FNamePoolEntry.GetLength = [lengthShift](uint16_t header) -> size_t
+        {
+            return static_cast<size_t>(header >> lengthShift);
+        };
+    }
+    if (_addressOverrides.hasObjectLayout)
+    {
+        pOffsets->FUObjectArray.ObjObjects = _addressOverrides.objObjectsOff;
+        pOffsets->TUObjectArray.Objects = _addressOverrides.objectsOff;
+        pOffsets->TUObjectArray.NumElements = _addressOverrides.numElementsOff;
+        pOffsets->TUObjectArray.NumElementsPerChunk = _addressOverrides.numElementsPerChunk;
+        pOffsets->FUObjectItem.Object = _addressOverrides.itemObjectOff;
+        pOffsets->FUObjectItem.Size = _addressOverrides.itemSize;
+        pOffsets->UObject.ClassPrivate = _addressOverrides.classPrivateOff;
+        pOffsets->UObject.NamePrivate = _addressOverrides.namePrivateOff;
+        pOffsets->UObject.OuterPrivate = _addressOverrides.outerPrivateOff;
+    }
+
+    _UEVars.NamesPtr = _addressOverrides.hasNamesPtr ? _addressOverrides.namesPtr : GetNamesPtr();
     if (IsUsingFNamePool())
     {
         if (!kPtrValidator.isPtrReadable(_UEVars.NamesPtr))
@@ -708,11 +751,14 @@ UEVarsInitStatus IGameProfile::InitUEVars()
         return GetNameByID(id);
     };
 
-    _UEVars.GUObjectsArrayPtr = GetGUObjectArrayPtr();
+    _UEVars.GUObjectsArrayPtr = _addressOverrides.hasGUObjectArrayPtr
+        ? _addressOverrides.guObjectArrayPtr
+        : GetGUObjectArrayPtr();
     if (!kPtrValidator.isPtrReadable(_UEVars.GUObjectsArrayPtr))
         return UEVarsInitStatus::ERROR_INIT_GUOBJECTARRAY;
 
-    BootstrapCoreObjectArrayOffsets(_UEVars.pGetNameByID, pOffsets, _UEVars.GUObjectsArrayPtr);
+    if (!_addressOverrides.hasObjectLayout)
+        BootstrapCoreObjectArrayOffsets(_UEVars.pGetNameByID, pOffsets, _UEVars.GUObjectsArrayPtr);
 
     _UEVars.ObjObjectsPtr = _UEVars.GUObjectsArrayPtr + pOffsets->FUObjectArray.ObjObjects;
 

@@ -51,6 +51,8 @@ inline const char *const kInternal = "E_INTERNAL";
     inline const char *const kDecodeFailed = "E_DECODE_FAILED"; // 指令解码失败
     inline const char *const kCancelled = "E_CANCELLED";
     inline const char *const kPtraceFailed = "E_PTRACE_FAILED"; // ptrace attach/detach 或远程调用失败（F 组）
+    inline const char *const kMapStale = "E_MAP_STALE";        // maps revision 已变化
+    inline const char *const kSessionStale = "E_SESSION_STALE"; // 候选/搜索 session 已失效
 }  // namespace Err
 
 // ------------------------------------------------ 返回值约定（协议 §5，唯一对齐事实）
