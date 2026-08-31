@@ -12,6 +12,8 @@ set(ANDROID_ABI arm64-v8a)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_SOURCE_DIR}/outputs/${ANDROID_ABI})
 project(UnrealMemoryTools)
 
+option(UMT_GHIDRA "Enable ghidra-native ARM64 decompiler" ON)
+
 set(KITTYMEMORY_PATH KittyMemoryEx)
 file(GLOB KITTYMEMORY_SRC ${KITTYMEMORY_PATH}/*.cpp)
 
@@ -25,6 +27,9 @@ file(GLOB AUTOFIX_SRC src/AutoFix/*.cpp)
 # MCP 命令服务（服务端）
 file(GLOB MCP_SRC src/mcp/*.cpp)
 file(GLOB MCP_ANALYSIS_SRC src/mcp/analysis/*.cpp)
+if(UMT_GHIDRA)
+    list(APPEND MCP_SRC third_party/ghidra_decomp/GhidraDecompiler.cpp)
+endif()
 file(GLOB GUI_SRC
         src/GUI/Android_draw/*.cpp
         src/GUI/Android_Graphics/*.cpp
@@ -49,6 +54,9 @@ include_directories(
         src/GUI/ImGui/misc/git_freetype
         src/GUI/My_Utils
         src/GUI/native_surface)
+if(UMT_GHIDRA)
+    include_directories(third_party/ghidra_decomp include)
+endif()
 link_libraries(-llog -landroid -lEGL -lGLESv3 -lvulkan -lz -ldl)
 
 add_executable(UnrealMemoryTools ${UE_SRC} ${UE_PROFILE_SRC} ${AUTOFIX_SRC} ${MCP_SRC} ${MCP_ANALYSIS_SRC} ${GUI_SRC} src/executable.cpp src/Dumper.cpp src/UPackageGenerator.cpp src/SDKExplorer.cpp ${KITTYMEMORY_SRC} ${DEPS_PATH}/fmt/format.cc
@@ -68,3 +76,8 @@ target_compile_definitions(UnrealMemoryTools PRIVATE
 
 target_link_libraries(UnrealMemoryTools PRIVATE
         ${CMAKE_SOURCE_DIR}/src/GUI/ImGui/misc/git_freetype/${ANDROID_ABI}/libfreetype.a)
+if(UMT_GHIDRA)
+    target_link_libraries(UnrealMemoryTools PRIVATE
+        ${CMAKE_SOURCE_DIR}/third_party/ghidra_decomp/libdecomp.a)
+    target_compile_definitions(UnrealMemoryTools PRIVATE UMT_GHIDRA=1)
+endif()

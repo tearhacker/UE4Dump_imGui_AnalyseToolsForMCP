@@ -30,12 +30,13 @@ _CMD_ALIASES = {
     "write_memory": "WRITE_MEMORY",           # 🔴 协议文档写的是 MEMORY_WRITE
 }
 
-# 设备端实际注册的全部命令（src/executable.cpp SetupMcpCommands，45 条）。
+# 设备端实际注册的全部命令（src/executable.cpp SetupMcpCommands，47 条）。
 # 用作启动自检，防止工具名改动后静默发出不存在的命令名。
 DEVICE_COMMANDS = frozenset({
     "PING", "LIST_PROCESSES", "GET_LOGS", "GET_CAPABILITIES",
     "MEMORY_READ", "MEMORY_READ_VALUE", "READ_STRING", "LIST_MODULES",
     "DECODE_ADRL", "WRITE_MEMORY", "SCAN_PATTERN", "SEARCH_MEMORY", "FIND_REFERENCES", "DISASSEMBLE",
+    "DECOMPILE", "DECOMPILER_STATUS",
     "BEGIN_ATTACH_SESSION", "END_ATTACH_SESSION", "CALL_REMOTE_FUNCTION",
     "CALL_REMOTE_FUNCTION_BATCH", "ALLOC_SCRATCH",
     "SCAN_GNAMES", "SAMPLE_GNAMES", "SCAN_OBJECTS", "SAMPLE_OBJECTS",
@@ -453,6 +454,48 @@ def disassemble(address: str, count: int | None = None) -> str:
     return _dev("disassemble", address=address, count=count)
 
 
+def decompile(
+    address: str,
+    size: int = 256,
+    max_instructions: int = 256,
+    max_output_bytes: int = 262144,
+    optimize: bool = True,
+    stop_at_return: bool = True,
+) -> str:
+    """使用 Ghidra-native ARM64 反编译器将指定函数反编译为 C 伪代码。
+
+    <use_case>
+    - AutoFix 候选验证：拿到 RVA 后确认函数语义
+    - native 逻辑定位：理解伤害计算、血量写入等游戏逻辑
+    - SDK 逆向辅助：结合 DISASSEMBLE，先汇编后反编译
+    </use_case>
+
+    <important_notes>
+    - 地址必须在有效代码段内，否则返回 E_READ_FAILED
+    - size 过大可能导致反编译超时（默认 60s）
+    - 首次调用需要加载 spec（约 1-3 秒延迟）
+    </important_notes>
+
+    **中文触发词**：反编译、decompile、看函数、还原代码
+    """
+    if size % 4 != 0:
+        raise ToolError("size 必须是 4 的倍数（ARM64 指令对齐要求）")
+    return _dev(
+        "decompile",
+        address=address,
+        size=size,
+        maxInstructions=max_instructions,
+        maxOutputBytes=max_output_bytes,
+        optimize=optimize,
+        stopAtReturn=stop_at_return,
+    )
+
+
+def decompiler_status() -> str:
+    """查询反编译器模块状态（是否已加载、spec 是否可用）。"""
+    return _dev("decompiler_status")
+
+
 # ============================================================ G 引擎语义
 def detect_ue_version() -> str:
     """探测目标进程的 UE 版本（UE4.x / UE5.x）。"""
@@ -658,6 +701,7 @@ TOOLS: list[Any] = [
     scan_pattern, search_memory, find_references, list_modules, resolve_symbol,
     # E
     decode_adrl, disassemble,
+    decompile, decompiler_status,
     # G
     detect_ue_version, sample_gnames, scan_gnames,
     sample_objects, scan_objects,
@@ -698,6 +742,11 @@ DEVICE_PARAMS: dict[str, frozenset[str]] = {
                                    "segmentPermissions", "maxResults", "includeDisassembly",
                                    "cursor", "sessionId", "async"}),
     "DISASSEMBLE": frozenset({"address", "count"}),
+    "DECOMPILE": frozenset({
+        "address", "size", "maxInstructions", "maxOutputBytes",
+        "optimize", "stopAtReturn",
+    }),
+    "DECOMPILER_STATUS": frozenset(),
     "BEGIN_ATTACH_SESSION": frozenset({"maxHoldMs"}),
     "END_ATTACH_SESSION": frozenset({"sessionId"}),
     "CALL_REMOTE_FUNCTION": frozenset(

@@ -44,6 +44,7 @@
 #include "mcp/MemoryHelpers.hpp"
 #include "mcp/Arm64Disasm.hpp"
 #include "mcp/PtraceSession.hpp"
+#include "mcp/DecompileHandler.hpp"
 #include "mcp/analysis/MemoryAnalysis.hpp"
 #include "mcp/analysis/UECandidateAnalysis.hpp"
 #include "mcp/analysis/ArtifactMetadata.hpp"
@@ -1778,6 +1779,20 @@ namespace
                 }
                 return {{"address", UmtMcp::FormatAddress(addr)}, {"count", (int)lines.size()},
                         {"instructions", lines}};
+            }, true);
+
+        // ── DECOMPILE（E 组 · 理解层 · ARM64 反编译）
+        UmtMcp::CommandDispatcher::Register("DECOMPILE",
+            [](const json &args) -> json
+            {
+                return UmtMcp::DecompileHandler::Handle(args);
+            }, false);
+
+        // ── DECOMPILER_STATUS（E 组 · 理解层 · 查询反编译器状态）
+        UmtMcp::CommandDispatcher::Register("DECOMPILER_STATUS",
+            [](const json &) -> json
+            {
+                return UmtMcp::DecompileHandler::Status();
             }, true);
 
         // ── F 组 远程调用（ptrace，风险最高）

@@ -1,0 +1,30 @@
+WSL2 inspection verification
+
+Changed field: STATE, from Stopped to Running after launching Ubuntu for inspection.
+
+Artifacts:
+- ORIGINAL.txt
+- MODIFIED_FILE
+- DIFF_FILE
+- VERIFICATION.txt
+- ROLLBACK.sh
+
+BASELINE command: Get-Content .codex_artifacts/wsl2_inspection/ORIGINAL.txt
+BASELINE literal output:
+WSL_VERSION=2.6.3.0
+DISTRO=Ubuntu
+STATE=Stopped
+WSL_GENERATION=2
+BASELINE exit status: 0
+
+MODIFIED command: Get-Content .codex_artifacts/wsl2_inspection/MODIFIED_FILE
+MODIFIED literal output: STATE=Running; KERNEL=6.6.87.2-microsoft-standard-WSL2; ARCH=x86_64; USER=tear; MEMORY_TOTAL=23Gi; MEMORY_AVAILABLE=22Gi; SWAP_TOTAL=6.0Gi; ROOTFS_TOTAL=1007G; ROOTFS_USED=176G; ROOTFS_AVAILABLE=781G
+MODIFIED exit status: 0
+
+ROLLBACK command: bash.exe -c "chmod +x .codex_artifacts/wsl2_inspection/ROLLBACK.sh; .codex_artifacts/wsl2_inspection/ROLLBACK.sh .codex_artifacts/wsl2_inspection/ROLLBACK_TEST"
+ROLLBACK literal output: restored:.codex_artifacts/wsl2_inspection/ROLLBACK_TEST
+ROLLBACK exit status: 0
+ROLLBACK verification command: sha256sum .codex_artifacts/wsl2_inspection/ROLLBACK_TEST .codex_artifacts/wsl2_inspection/ORIGINAL.txt
+ROLLBACK verification result: both hashes 4e74ae0c0430274097c754bafac75277e9fb9b3daa14f7c4a47773c2f0b23177
+
+Restored behavior/status: rollback copy contains STATE=Stopped and matches ORIGINAL.txt byte-for-byte; the live Ubuntu distro remains available under WSL2.

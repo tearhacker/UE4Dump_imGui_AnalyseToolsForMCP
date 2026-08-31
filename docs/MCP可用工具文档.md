@@ -1,10 +1,10 @@
 # UMT MCP 可用工具文档
 
-> 本文档覆盖本项目 MCP 服务端（`mcp_server`）当前**已注册并可调用**的全部 45 个 MCP 工具，
-> 与设备端（`Alltear_UnrealMemoryToolsNewMcp`）实际注册的 45 条命令一一对应。
+> 本文档覆盖本项目 MCP 服务端（`mcp_server`）当前**已注册并可调用**的全部 47 个 MCP 工具，
+> 与设备端（`Alltear_UnrealMemoryToolsNewMcp`）实际注册的 47 条命令一一对应。
 > 内容以 `mcp_server/src/umt_mcp/tools.py` 与设备端 `src/executable.cpp` 的真实实现为准。
 
-- 文档版本：1.1（2026-08-31）
+- 文档版本：1.2（2026-08-31）
 - 协议版本：1（`config.PROTOCOL_VERSION`）
 - 服务端：Python `FastMCP`（stdio），工具名对外为 **camelCase**
 - 设备端：Android/C++ 命令服务，`127.0.0.1:35515`，经 `adb forward` 暴露
@@ -133,6 +133,8 @@ args 中每个元素都是**字符串**：
 | D 内存原语 | `resolveSymbol` | `RESOLVE_SYMBOL` | 符号名解析地址 |
 | E 理解层 | `decodeAdrl` | `DECODE_ADRL` | 解码 ADRP/ADR+LDR 序列 |
 | E 理解层 | `disassemble` | `DISASSEMBLE` | ARM64 反汇编 |
+| E 理解层 | `decompile` | `DECOMPILE` | Ghidra-native ARM64 反编译为 C 伪代码 |
+| E 理解层 | `decompilerStatus` | `DECOMPILER_STATUS` | 查询 Ghidra-native 初始化与版本状态 |
 | G 引擎语义 | `detectUeVersion` | `DETECT_UE_VERSION` | 探测 UE4/UE5 版本 |
 | G 引擎语义 | `sampleGnames` | `SAMPLE_GNAMES` | 抽样读 GNames（快） |
 | G 引擎语义 | `scanGnames` | `SCAN_GNAMES` | 全量扫 GNames（重） |
@@ -420,6 +422,58 @@ processStartTime 和 mapRevision。模块与匿名映射分别用 `cursor` / `an
 - `count`（可选 int）。
 反汇编指定地址处的 ARM64 指令。走设备端自研解码器（不依赖 capstone），未识别指令返回 `"???"`。
 
+#### decompile
+```json
+{
+  "tool": "decompile",
+  "address": "0x7a3b4000",
+  "size": 256,
+  "max_instructions": 256,
+  "max_output_bytes": 262144,
+  "optimize": true,
+  "stop_at_return": true
+}
+```
+- `address`（必填 str）：目标函数起始地址，必须是有效的 ARM64 代码地址。
+- `size`（可选 int，默认 256）：读取的代码字节数，必须是 4 的倍数，范围 `[4, 65536]`。
+- `max_instructions`（可选 int，默认 256）：反编译最多处理的指令数。
+- `max_output_bytes`（可选 int，默认 262144）：PC 侧输出预算；设备端返回的 `c_code` 仍受单帧 1 MiB 上限约束。
+- `optimize`、`stop_at_return`（可选 bool）：控制分析选项。
+
+设备端流程为：读取目标进程内存 → 写入临时 raw image → 通过 `RawBinaryArchitecture` 加载
+`AARCH64:LE:64:v8A` → 执行 Ghidra-native 数据流/控制流分析 → 输出 C 伪代码。成功返回：
+
+```json
+{
+  "address": "0x7a3b4000",
+  "size": 256,
+  "mode": "ghidra-native",
+  "c_code": "void decompiled_function(void) { ... }",
+  "instructions_count": 42,
+  "output_bytes": 1024
+}
+```
+
+前置条件：已 `selectProcess` → `attach`，并且设备端存在
+`/data/local/tmp/UnrealMemoryTools/ghidra_decomp/spec/AARCH64/` 下的 AARCH64 spec 文件。
+首次调用会初始化 decompiler；初始化失败返回 `E_DECOMPILE_FAILED`，内存读取失败返回
+`E_READ_FAILED`，参数不合法返回 `E_BAD_ARGS`。每次调用完成后设备端删除临时 raw image。
+
+#### decompilerStatus
+```json
+{ "tool": "decompilerStatus" }
+```
+返回当前模块状态：
+
+```json
+{
+  "ready": true,
+  "version": "ghidra-native-2.1.0"
+}
+```
+
+`ready=false` 时会附带 `error` 字段。该查询不读取目标进程内存，也不会触发反编译。
+
 ---
 
 ### 5.6 G 组：引擎语义
@@ -614,7 +668,18 @@ selectProcess → attach → startProbe → getProbeStatus
   → analyzeClass("APlayerController")  // 深度分析，用 getDumpStatus 跟踪
 ```
 
-### 6.3 内存定位
+### 6.3 ARM64 反编译
+
+```text
+selectProcess → attach → decompilerStatus
+  → decompile(address, size)
+  → 返回 mode=ghidra-native 的 C 伪代码
+```
+
+若 `decompilerStatus.ready=false`，先确认设备端已部署 `ghidra_decomp/spec/AARCH64`，
+再重试 `decompilerStatus`；无需重新编译 Python MCP 服务。
+
+### 6.4 内存定位
 
 ```text
 listModules → resolveSymbol("GWorld")        // 有符号时
@@ -623,7 +688,7 @@ listModules → resolveSymbol("GWorld")        // 有符号时
   → followPointerChain(base, offsets)        // 逐级解引用
 ```
 
-### 6.4 远程调用（危险，谨慎）
+### 6.5 远程调用（危险，谨慎）
 
 ```text
 推荐：callRemoteFunctionBatch(address, argSets)   // 无状态，用完即 detach

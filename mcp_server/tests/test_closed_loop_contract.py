@@ -38,8 +38,8 @@ def captured_calls(monkeypatch: pytest.MonkeyPatch) -> list[tuple[str, dict[str,
 
 
 def test_tool_budget_and_new_commands() -> None:
-    assert len(tools.TOOLS) == 45
-    assert len(tools.DEVICE_COMMANDS) == 45
+    assert len(tools.TOOLS) == 47
+    assert len(tools.DEVICE_COMMANDS) == 47
     assert {"SEARCH_MEMORY", "FIND_REFERENCES"} <= tools.DEVICE_COMMANDS
     assert tools.self_check() == []
 
