@@ -29,6 +29,11 @@ public:
     static void Stop();
     static bool IsRunning();
 
+    // 🔴 给 IMGUI 面板用的运行态快照（原子，免锁读）：客户端是否在线 + 累计工具调用次数。
+    // 让面板直接展示「连接状态 / 调用了多少工具」，不必再去日志里翻连接上下线。
+    static bool IsClientConnected();
+    static uint64_t ToolCallCount();
+
     // 🔴 运行期覆盖监听地址。传空串则回退到 kBindAddress(127.0.0.1)。
     // 需在 Start() 之前调用；Start() 内部会自动读取 mcp_bind.conf。
     // 放开到非回环（0.0.0.0 / 局域网 IP）= 把 root 级内存读写暴露到网络。
@@ -53,6 +58,8 @@ private:
 
     static std::atomic<bool> running_;
     static std::atomic<bool> stopRequested_;
+    static std::atomic<bool> clientConnected_;   // 当前是否有客户端连着
+    static std::atomic<uint64_t> toolCallCount_; // 累计收到的工具调用次数
     static std::thread thread_;
     static std::string buildVersion_;
     static uint16_t port_;

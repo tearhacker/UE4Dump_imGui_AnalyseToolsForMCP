@@ -24,6 +24,8 @@ using json = nlohmann::json;
 
 std::atomic<bool> CommandServer::running_{false};
 std::atomic<bool> CommandServer::stopRequested_{false};
+std::atomic<bool> CommandServer::clientConnected_{false};
+std::atomic<uint64_t> CommandServer::toolCallCount_{0};
 std::thread CommandServer::thread_;
 std::string CommandServer::buildVersion_ = "1.0.0";
 uint16_t CommandServer::port_ = kDefaultPort;
@@ -34,6 +36,16 @@ std::string CommandServer::bindAddress_ = kBindAddress;
 bool CommandServer::IsRunning()
 {
     return running_.load();
+}
+
+bool CommandServer::IsClientConnected()
+{
+    return clientConnected_.load();
+}
+
+uint64_t CommandServer::ToolCallCount()
+{
+    return toolCallCount_.load();
 }
 
 void CommandServer::SetBindAddress(const std::string &addr)
@@ -214,6 +226,7 @@ bool CommandServer::HandleFrame(int sock, const std::string &line)
             argsSummary = argsSummary.substr(0, 240) + "...(已截断)";
         LOGI("[MCP·调用] %s  id=%llu  args=%s",
              cmd.c_str(), (unsigned long long)id, argsSummary.c_str());
+        toolCallCount_.fetch_add(1, std::memory_order_relaxed);
     }
 
     queue_->PushRequest({id, cmd, args.dump()});
@@ -329,6 +342,7 @@ void CommandServer::ServerLoop()
             else
                 LOGI("[MCP·连接] 客户端已连接");
             s_lastConnectTs = now;
+            clientConnected_.store(true);
         }
         // 🔴 新连接:清空队列,丢弃上一连接的未消费响应(防止孤儿响应污染)
         CommandDispatcher::Clear();
@@ -421,6 +435,7 @@ void CommandServer::ServerLoop()
             if ((now - s_lastConnectTs) >= kConnCoalesceSec)
                 LOGI("[MCP·连接] 客户端断开");
             s_lastDisconnectTs = now;
+            clientConnected_.store(false);
         }
     }
 

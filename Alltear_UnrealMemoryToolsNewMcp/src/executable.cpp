@@ -3988,6 +3988,23 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
             ImGui::TextDisabled("%s", Tr("MCP 服务未运行", "MCP service not running"));
         }
 
+        // 🔴 客户端实时状态：直接展示在线/离线 + 累计工具调用数，
+        // 不必再去日志里翻「已连接/已断开」刷屏（连接上下线已合并+可隐藏）
+        ImGui::Dummy(ImVec2(0.0f, 6.0f));
+        ImGui::TextDisabled("%s", Tr("客户端", "Client"));
+        if (UmtMcp::CommandServer::IsClientConnected())
+        {
+            ImGui::TextColored(ImVec4(0.36f, 0.92f, 0.45f, 1.0f), "%s",
+                               Tr("● 已连接", "● Connected"));
+        }
+        else
+        {
+            ImGui::TextColored(ImVec4(0.95f, 0.78f, 0.36f, 1.0f), "%s",
+                               Tr("○ 未连接", "○ Disconnected"));
+        }
+        ImGui::Text("%s: %llu", Tr("累计工具调用", "Tool calls"),
+                   (unsigned long long)UmtMcp::CommandServer::ToolCallCount());
+
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
         ImGui::Separator();
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
