@@ -125,7 +125,10 @@ class UmtBridge:
         while True:
             attempt += 1
             try:
-                self._connect_once(force_forward=attempt > 1)
+                # 🔴 每次重连都强制重建 adb forward：adb 的 "forward --list" 只查记录不验活，
+                # 隧道(USB)实际已死但仍"列着"时会返回假成功，导致首轮连接踩到死隧道再重试。
+                # 直接 force=True 重建幂等且便宜，保证拿到的是真活链路，消除重连抖动。
+                self._connect_once(force_forward=True)
                 return
             except (OSError, proto.UmtError) as exc:
                 last_exc = exc

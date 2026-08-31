@@ -1,0 +1,15 @@
+{
+  "mcpServers": {
+    "ue4dump-mcp": {
+      "command": "C:/Program Files/Python310/python.exe",
+      "args": [
+        "D:/泪心安卓领域基本盘技术/ue4ImGuiAutoWorkingMcpBytear/mcp_server/server.py",
+        "--no-adb",
+        "--host",
+        "127.0.0.1",
+        "--port",
+        "35515"
+      ]
+    }
+  }
+}
