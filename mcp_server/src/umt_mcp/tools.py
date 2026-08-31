@@ -563,12 +563,14 @@ def search_classes(query: str, max_results: int | None = None) -> str:
     return _dev("search_classes", nameFilter=query, maxResults=max_results)
 
 
-def describe_class(class_name: str) -> str:
+def describe_class(class_name: str | None = None, address: str | None = None) -> str:
     """取一个 UClass 的完整定义：字段（含继承）、函数签名、Size/对齐/CDO。
 
     字段列表会递归父类，不是只看当前层。
     """
-    return _dev("describe_class", name=class_name)
+    if not class_name and not address:
+        raise ToolError("必须提供 class_name 或 address")
+    return _dev("describe_class", name=class_name, address=address)
 
 
 def inspect_object(address: str) -> str:

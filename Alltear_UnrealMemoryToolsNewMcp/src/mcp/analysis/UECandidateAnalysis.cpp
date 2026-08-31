@@ -428,10 +428,15 @@ const ObjectCandidate &GetObjectCandidate(const std::string &sessionId, int cand
 bool ReadObjectAt(const KittyMemoryMgr &mgr, const ObjectCandidate &candidate, int32_t index,
                   uintptr_t &object)
 {
+    object = 0;
+    if (index < 0 || index >= candidate.numElements || candidate.layout.itemSize == 0)
+        return false;
     const ObjectLayout &layout = candidate.layout;
     uintptr_t itemBase = candidate.objectsAddress;
     if (layout.chunked)
     {
+        if (layout.numElementsPerChunk == 0)
+            return false;
         const uint32_t chunkIndex = static_cast<uint32_t>(index) / layout.numElementsPerChunk;
         const uint32_t within = static_cast<uint32_t>(index) % layout.numElementsPerChunk;
         uintptr_t chunk = 0;
@@ -441,7 +446,7 @@ bool ReadObjectAt(const KittyMemoryMgr &mgr, const ObjectCandidate &candidate, i
     }
     else
         itemBase += static_cast<uintptr_t>(index) * layout.itemSize;
-    return ReadValue(mgr, itemBase + layout.itemObjectOff, object) && object != 0;
+    return ReadValue(mgr, itemBase + layout.itemObjectOff, object) && object >= 0x10000;
 }
 
 ObjectCandidate ValidateObjectCandidate(const KittyMemoryMgr &mgr, const MapSnapshot &snapshot,
@@ -452,14 +457,26 @@ ObjectCandidate ValidateObjectCandidate(const KittyMemoryMgr &mgr, const MapSnap
     candidate.layout = layout;
     const uintptr_t objObjects = array + layout.objObjectsOff;
     if (!ReadValue(mgr, objObjects + layout.objectsOff, candidate.objectsAddress) ||
-        !IsReadableAddress(snapshot, candidate.objectsAddress, sizeof(uintptr_t)))
+        !IsWritableAddress(snapshot, candidate.objectsAddress, sizeof(uintptr_t)))
     {
-        candidate.failedChecks.push_back("Objects/Chunks pointer unreadable");
+        candidate.failedChecks.push_back("Objects/Chunks pointer is not writable storage");
         return candidate;
     }
     candidate.score += 15;
     candidate.evidence.push_back({{"check", "Objects/Chunks pointer readable"},
                                   {"address", FormatAddress(candidate.objectsAddress)}});
+    if (layout.chunked)
+    {
+        uintptr_t firstChunk = 0;
+        if (!ReadValue(mgr, candidate.objectsAddress, firstChunk) ||
+            !IsWritableAddress(snapshot, firstChunk, layout.itemSize))
+        {
+            candidate.failedChecks.push_back("first chunk is not writable storage");
+            return candidate;
+        }
+        candidate.evidence.push_back({{"check", "first chunk writable"},
+                                      {"address", FormatAddress(firstChunk)}});
+    }
     if (!ReadValue(mgr, objObjects + layout.numElementsOff, candidate.numElements) ||
         candidate.numElements < 1024 || candidate.numElements > 5000000)
     {

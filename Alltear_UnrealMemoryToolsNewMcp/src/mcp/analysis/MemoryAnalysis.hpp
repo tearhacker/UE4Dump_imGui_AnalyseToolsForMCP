@@ -24,6 +24,7 @@ struct MapSnapshot
 MapSnapshot CaptureMaps(const KittyMemoryMgr &mgr);
 std::string CurrentMapRevision(const KittyMemoryMgr &mgr);
 bool IsReadableAddress(const MapSnapshot &snapshot, uintptr_t address, size_t size = 1);
+bool IsWritableAddress(const MapSnapshot &snapshot, uintptr_t address, size_t size = 1);
 ElfScanner FindUnrealElf(const KittyMemoryMgr &mgr, const std::string &moduleHint = {});
 
 json ListModules(const json &args, const KittyMemoryMgr &mgr);

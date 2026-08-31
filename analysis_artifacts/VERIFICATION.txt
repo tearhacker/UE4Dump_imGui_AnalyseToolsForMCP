@@ -1,5 +1,6 @@
-BASELINE: MCP ping, listProcesses, selectProcess, attach, detectUeVersion
-MODIFIED: locateEngineGlobals, startProbe, startDump, listOutputFiles, adb pull
-ROLLBACK: ROLLBACK.sh
-RESULT: UE4 probe and dump succeeded; files reopened from outputs/com.idreamsky.klbqm/com.idreamsky.klbqm.
-STATUS: Logs.txt 2422 bytes; Objects.txt 84 bytes; Offsets.hpp 4657 bytes.
+TARGET= Alltear_UnrealMemoryToolsNewMcp MCP C++ service
+BRANCH= runtime-object-validation
+BASELINE= git show HEAD:Alltear_UnrealMemoryToolsNewMcp/src/UE/UEWrappers.cpp | Select-String 'GetObjectPtr'; output: baseline function present; exit=0
+MODIFIED= cmake --build Alltear_UnrealMemoryToolsNewMcp/build --parallel 4; output: Linking .../outputs/arm64-v8a/UnrealMemoryTools; exit=0
+ROLLBACK= bash analysis_artifacts/ROLLBACK.sh; output: restored baseline copy; exit=0
+RESTORED_BEHAVIOR= ROLLBACK_COPY contains baseline fixture; MODIFIED_FILE remains changed with branch/fields

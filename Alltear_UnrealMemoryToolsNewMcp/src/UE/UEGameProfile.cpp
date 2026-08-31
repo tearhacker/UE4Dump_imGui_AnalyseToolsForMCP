@@ -765,7 +765,10 @@ UEVarsInitStatus IGameProfile::InitUEVars()
     if (!vm_rpm_ptr((void *)(_UEVars.ObjObjectsPtr + pOffsets->TUObjectArray.Objects),
                     &_UEVars.ObjObjects_Objects, sizeof(uintptr_t)))
         return UEVarsInitStatus::ERROR_INIT_OBJOBJECTS;
-    if (!kPtrValidator.isPtrReadable(_UEVars.ObjObjects_Objects))
+    // The object storage itself must be writable.  A readable executable
+    // mapping is commonly instruction bytes and was previously accepted as
+    // the Objects table, producing bogus pointers and an empty SDK dump.
+    if (!kPtrValidator.isPtrWritable(_UEVars.ObjObjects_Objects, sizeof(uintptr_t)))
         return UEVarsInitStatus::ERROR_INIT_OBJOBJECTS;
 
     LOGI("[Bootstrap] Runtime object array: GUObject=0x%lx ObjObjects=0x%lx Objects=0x%lx",
@@ -779,6 +782,24 @@ UEVarsInitStatus IGameProfile::InitUEVars()
     _UEVars.StaticFindObject = GetStaticFindObject();
     _UEVars.NativeAndroidApp = GetNativeAndroidApp();
     UEWrappers::Init(GetUEVars());
+    // Do not report Probe success until at least one real UObject can be
+    // traversed with the selected layout.  This catches stale/incorrect
+    // overrides before SEARCH_CLASSES and DUMP consume them.
+    bool hasObjectSample = false;
+    if (auto *objects = UEWrappers::GetObjects())
+    {
+        const int32_t total = objects->GetNumElements();
+        const int32_t sampleLimit = std::min<int32_t>(total, 64);
+        for (int32_t i = 0; i < sampleLimit; ++i)
+        {
+            if (objects->GetObjectPtr(i)) { hasObjectSample = true; break; }
+        }
+    }
+    if (!hasObjectSample)
+    {
+        LOGE("[Bootstrap] object array layout validated but no readable UObject sample");
+        return UEVarsInitStatus::ERROR_INIT_OBJOBJECTS;
+    }
     _UEVars.ProcessEvent = GetProcessEvent();
 
     return UEVarsInitStatus::SUCCESS;
@@ -1066,13 +1087,13 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
         {
             const uintptr_t candObjAddr = namesScanBase + 8ULL * static_cast<uintptr_t>(i);
             uintptr_t objects = vm_rpm_ptr<uintptr_t>((void *)(candObjAddr + objObjectsOff));
-            if (objects >= 0x10000 && kPtrValidator.isPtrReadable(objects))
+            if (objects >= 0x10000 && kPtrValidator.isPtrWritable(objects, sizeof(uintptr_t)))
             {
                 uintptr_t firstObj = 0;
                 if (numChunks > 0)
                 {
                     const uintptr_t chunk0 = vm_rpm_ptr<uintptr_t>((void *)objects);
-                    if (kPtrValidator.isPtrReadable(chunk0))
+                    if (kPtrValidator.isPtrWritable(chunk0, sizeof(uintptr_t)))
                         firstObj = vm_rpm_ptr<uintptr_t>((void *)(chunk0 + itemObj));
                 }
                 else
@@ -1109,13 +1130,13 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
             if (candObjAddr < 0x10000)
                 continue;
             uintptr_t objects = vm_rpm_ptr<uintptr_t>((void *)(candObjAddr + objObjectsOff));
-            if (objects >= 0x10000 && kPtrValidator.isPtrReadable(objects))
+            if (objects >= 0x10000 && kPtrValidator.isPtrWritable(objects, sizeof(uintptr_t)))
             {
                 uintptr_t firstObj = 0;
                 if (numChunks > 0)
                 {
                     const uintptr_t chunk0 = vm_rpm_ptr<uintptr_t>((void *)objects);
-                    if (kPtrValidator.isPtrReadable(chunk0))
+                    if (kPtrValidator.isPtrWritable(chunk0, sizeof(uintptr_t)))
                         firstObj = vm_rpm_ptr<uintptr_t>((void *)(chunk0 + itemObj));
                 }
                 else

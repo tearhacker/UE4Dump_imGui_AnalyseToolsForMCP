@@ -2230,7 +2230,9 @@ namespace
         UmtMcp::CommandDispatcher::Register("DESCRIBE_CLASS",
             [](const json &args) -> json
             {
-                auto *objects = RequireObjects();
+                // Address-based class analysis must work independently of the
+                // global object iterator. Name lookup still requires it below.
+                auto *objects = UEWrappers::GetObjects();
                 UE_UClass cls;
                 std::string addrStr = args.value("address", "");
                 std::string name = args.value("name", "");
@@ -2243,6 +2245,8 @@ namespace
                 }
                 else if (!name.empty())
                 {
+                    if (!objects)
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "对象数组未初始化，无法按名称查类");
                     UE_UObject found = objects->FindObjectFast(name);
                     if (!found) throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "未找到类: " + name);
                     if (!found.IsA(UE_UClass::StaticClass()))
@@ -2299,7 +2303,12 @@ namespace
         UmtMcp::CommandDispatcher::Register("INSPECT_OBJECT",
             [](const json &args) -> json
             {
-                auto *objects = RequireObjects();
+                // Inspecting a caller-supplied address only needs an attached
+                // memory context. Requiring a working GUObjectArray here made
+                // direct runtime inspection impossible when object enumeration
+                // was the only broken subsystem.
+                if (!UEMemory::kMgr.isMemValid())
+                    throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
                 std::string addrStr = args.value("address", "");
                 if (addrStr.empty())
                     throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "address 不能为空");
@@ -2310,9 +2319,10 @@ namespace
                 if (!obj) throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "无效对象地址: " + addrStr);
                 UE_UClass cls = obj.GetClass();
                 UE_UObject outer = obj.GetOuter();
+                const bool canResolveCppName = UEWrappers::GetObjects() != nullptr;
                 return {{"address", UmtMcp::FormatAddress(reinterpret_cast<uintptr_t>(obj.GetAddress()))},
                         {"name", obj.GetName()},
-                        {"cppName", obj.GetCppName()},
+                        {"cppName", canResolveCppName ? obj.GetCppName() : ""},
                         {"fullName", obj.GetFullName()},
                         {"className", cls ? cls.GetName() : ""},
                         {"outerName", outer ? outer.GetName() : ""},

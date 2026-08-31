@@ -611,6 +611,16 @@ bool IsReadableAddress(const MapSnapshot &snapshot, uintptr_t address, size_t si
     return false;
 }
 
+bool IsWritableAddress(const MapSnapshot &snapshot, uintptr_t address, size_t size)
+{
+    if (size == 0) return false;
+    for (const auto &map : snapshot.maps)
+        if (map.writeable && address >= map.startAddress && address < map.endAddress &&
+            size <= map.endAddress - address)
+            return true;
+    return false;
+}
+
 ElfScanner FindUnrealElf(const KittyMemoryMgr &mgr, const std::string &moduleHint)
 {
     std::vector<std::string> names;
