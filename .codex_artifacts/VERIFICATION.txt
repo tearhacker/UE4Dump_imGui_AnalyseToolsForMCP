@@ -1,0 +1,9 @@
+BRANCH/FIELD: PC MCP response budgeting and UE4 Probe/Dump job handles.
+BASELINE: .venv\Scripts\python.exe -m pytest tests -q
+BASELINE RESULT: baseline command was unavailable in the initial shell because pytest was not on PATH; repository virtualenv used for verification.
+MODIFIED: .venv\Scripts\python.exe -m pytest tests -q
+MODIFIED RESULT: 61 passed in 5.60s; exit 0.
+ROLLBACK: .codex_artifacts\ROLLBACK.sh
+ROLLBACK RESULT: copy restored to baseline hash in script fixture; exit 0.
+RESTORED BEHAVIOR: rollback fixture restores original SHA256 while working tree remains modified.
+ARTIFACTS: MODIFIED_FILE, DIFF_FILE, VERIFICATION.txt, ROLLBACK.sh

@@ -1226,33 +1226,48 @@ namespace
         finish(true, dumpSoPath);
     }
 
-    void StartProbeSelected()
+    std::string StartProbeSelected()
     {
         if (gSelectedIndex < 0 || gSelectedIndex >= static_cast<int>(gCandidates.size()))
         {
             PushUiLog('E', "请先选择目标进程。");
-            return;
+            return {};
         }
         if (gWorkerThread.joinable())
             gWorkerThread.join();
-        gWorkerThread = std::thread(ExecuteProbe, gCandidates[gSelectedIndex]);
+        const std::string jobId = StartJob("probe");
+        const AutoProcessCandidate candidate = gCandidates[gSelectedIndex];
+        gWorkerThread = std::thread([candidate, jobId]() {
+            ExecuteProbe(candidate);
+            const bool success = gProbeResult.valid && gProbeResult.success;
+            FinishJob(jobId, success, success ? std::string() : "PROBE_FAILED");
+        });
+        return jobId;
     }
 
-    void StartDumpAfterProbe()
+    std::string StartDumpAfterProbe()
     {
         if (!gProbeResult.valid || !gProbeResult.success)
         {
             PushUiLog('E', "请先成功完成探针流程，再开始 Dump。");
-            return;
+            return {};
         }
         if (gSelectedIndex < 0 || gSelectedIndex >= static_cast<int>(gCandidates.size()))
         {
             PushUiLog('E', "请先选择目标进程。");
-            return;
+            return {};
         }
         if (gWorkerThread.joinable())
             gWorkerThread.join();
-        gWorkerThread = std::thread(ExecuteDump, gCandidates[gSelectedIndex]);
+        const std::string jobId = StartJob("dump");
+        const AutoProcessCandidate candidate = gCandidates[gSelectedIndex];
+        gWorkerThread = std::thread([candidate, jobId]() {
+            ExecuteDump(candidate);
+            bool success = false;
+            { std::lock_guard<std::mutex> lock(gDumpUiState.mutex); success = gDumpUiState.dumpSuccess; }
+            FinishJob(jobId, success, success ? std::string() : "DUMP_FAILED");
+        });
+        return jobId;
     }
 
     std::string StartDumpUnrealLib(const std::string &source = "AUTO")
@@ -1521,7 +1536,7 @@ namespace
                                             true);
         // ── GET_CAPABILITIES
         UmtMcp::CommandDispatcher::Register("GET_CAPABILITIES",
-            [](const json &) -> json
+            [](const json &args) -> json
             {
                 auto cmds = UmtMcp::CommandDispatcher::RegisteredCommands();
                 return {{"commands", cmds}, {"build", kUEDUMPER_VERSION}, {"protocol", UmtMcp::kProtocolVersion}};
@@ -2458,7 +2473,7 @@ namespace
 
         // ── ATTACH（状态入口：将 KittyMemoryMgr 附着到选中进程；PROBE 也会重做，此处供分步校验）
         UmtMcp::CommandDispatcher::Register("ATTACH",
-            [](const json &) -> json
+            [](const json &args) -> json
             {
                 RequireIdleWorker();
                 if (gSelectedIndex < 0 || gSelectedIndex >= static_cast<int>(gCandidates.size()))
@@ -2477,7 +2492,7 @@ namespace
         // ── START_PROBE（状态入口：触发完整探针，重活投 worker 线程，用 GET_PROBE_STATUS 轮询）
         //    命令名严格对齐 docs/mcp-protocol.md §6（startProbe → START_PROBE）
         UmtMcp::CommandDispatcher::Register("START_PROBE",
-            [](const json &) -> json
+            [](const json &args) -> json
             {
                 RequireIdleWorker();
                 if (gSelectedIndex < 0 || gSelectedIndex >= static_cast<int>(gCandidates.size()))
@@ -2498,13 +2513,14 @@ namespace
                         gProbeOverrideRevision != UmtMcp::Analysis::CurrentMapRevision(UEMemory::kMgr))
                         throw UmtMcp::HandlerError(UmtMcp::Err::kMapStale, "override 绑定的 maps revision 已变化");
                 }
-                StartProbeSelected();
-                return {{"started", true}, {"phase", "probing"}};
+                const std::string jobId = StartProbeSelected();
+                return {{"started", true}, {"jobId", jobId}, {"probeId", jobId},
+                        {"phase", "probing"}, {"suggestedWaitMs", args.value("waitMs", 5000)}};
             }, false);
 
         // ── DETECT_UE_VERSION（状态入口：读探针结果推断 UE 版本 / 基址 / profile）
         UmtMcp::CommandDispatcher::Register("DETECT_UE_VERSION",
-            [](const json &) -> json
+            [](const json &args) -> json
             {
                 if (!UEMemory::kMgr.isMemValid())
                     throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
@@ -2530,15 +2546,23 @@ namespace
 
         // ── START_DUMP（业务工具：触发完整 dump，重活投 worker，用 GET_DUMP_STATUS 轮询）
         UmtMcp::CommandDispatcher::Register("START_DUMP",
-            [](const json &) -> json
+            [](const json &args) -> json
             {
                 RequireIdleWorker();
                 if (gSelectedIndex < 0 || gSelectedIndex >= static_cast<int>(gCandidates.size()))
                     throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "请先 SELECT_PROCESS 选定目标进程");
                 if (!gProbeResult.valid || !gProbeResult.success)
                     throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "请先 START_PROBE 完成探针流程");
-                StartDumpAfterProbe();
-                return {{"started", true}};
+                const std::string probeId = args.value("probeId", "");
+                if (!probeId.empty()) {
+                    std::lock_guard<std::mutex> lock(gJobMutex);
+                    bool matched = false;
+                    for (const auto &job : gJobs)
+                        if (job.jobId == probeId && job.type == "probe" && !job.running && job.lastError.empty()) matched = true;
+                    if (!matched) throw UmtMcp::HandlerError(UmtMcp::Err::kNotReady, "probeId 不匹配或探针尚未成功");
+                }
+                const std::string jobId = StartDumpAfterProbe();
+                return {{"started", true}, {"jobId", jobId}, {"suggestedWaitMs", args.value("waitMs", 5000)}};
             }, false);
 
         // ── DUMP_UNREAL_LIBRARY（业务工具：转储 libUE4.so / libUnreal.so）
@@ -2591,14 +2615,16 @@ namespace
 
         // ── GET_PROBE_STATUS（业务工具：探针进度/状态，持 mutex 读 DumpUiState）
         UmtMcp::CommandDispatcher::Register("GET_PROBE_STATUS",
-            [](const json &) -> json
+            [](const json &args) -> json
             {
                 std::lock_guard<std::mutex> lock(gDumpUiState.mutex);
-                return {{"phase", gDumpUiState.phase},
+                const auto jobs = SnapshotJobs();
+                const std::string requested = args.value("jobId", "");
+                return {{"jobId", requested}, {"phase", gDumpUiState.phase},
                         {"objectsPercent", gDumpUiState.objectsPercent},
                         {"running", gDumpUiState.probeRunning},
                         {"finished", gDumpUiState.probeFinished},
-                        {"success", gDumpUiState.probeSuccess}};
+                        {"success", gDumpUiState.probeSuccess}, {"jobs", jobs}};
             }, true);
 
         // ── GET_DUMP_STATUS（业务工具：dump / soDump 进度与产物路径，持 mutex 读 DumpUiState）
@@ -3151,6 +3177,8 @@ namespace
                     throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "文件不存在: " + filePath);
                 const size_t fileSize = static_cast<size_t>(st.st_size);
                 const size_t kLargeFileThreshold = 1 * 1024 * 1024; // 1MB
+                const size_t offset = args.value("offset", static_cast<size_t>(0));
+                const size_t limit = std::min(args.value("limit", static_cast<size_t>(64 * 1024)), static_cast<size_t>(256 * 1024));
 
                 if (fileSize > kLargeFileThreshold)
                     return {{"filename", filename}, {"path", filePath},
@@ -3166,28 +3194,32 @@ namespace
                 std::fseek(fp, 0, SEEK_END);
                 long fsize = std::ftell(fp);
                 std::fseek(fp, 0, SEEK_SET);
-                std::vector<char> buf(fsize);
-                std::fread(buf.data(), 1, fsize, fp);
+                if (offset > static_cast<size_t>(fsize)) { std::fclose(fp); throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "offset 超出文件大小"); }
+                std::fseek(fp, static_cast<long>(offset), SEEK_SET);
+                const size_t readSize = std::min(limit, static_cast<size_t>(fsize) - offset);
+                std::vector<char> buf(readSize);
+                std::fread(buf.data(), 1, readSize, fp);
                 std::fclose(fp);
 
                 // base64 编码
                 static const char table[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
                 std::string b64;
                 b64.reserve(((fsize + 2) / 3) * 4);
-                for (size_t i = 0; i < static_cast<size_t>(fsize); i += 3)
+                for (size_t i = 0; i < buf.size(); i += 3)
                 {
                     uint32_t n = (static_cast<uint8_t>(buf[i]) << 16) |
-                                 (i + 1 < static_cast<size_t>(fsize) ? static_cast<uint8_t>(buf[i + 1]) << 8 : 0) |
-                                 (i + 2 < static_cast<size_t>(fsize) ? static_cast<uint8_t>(buf[i + 2]) : 0);
+                                 (i + 1 < buf.size() ? static_cast<uint8_t>(buf[i + 1]) << 8 : 0) |
+                                 (i + 2 < buf.size() ? static_cast<uint8_t>(buf[i + 2]) : 0);
                     b64 += table[(n >> 18) & 0x3f];
                     b64 += table[(n >> 12) & 0x3f];
-                    b64 += (i + 1 < static_cast<size_t>(fsize)) ? table[(n >> 6) & 0x3f] : '=';
-                    b64 += (i + 2 < static_cast<size_t>(fsize)) ? table[n & 0x3f] : '=';
+                    b64 += (i + 1 < buf.size()) ? table[(n >> 6) & 0x3f] : '=';
+                    b64 += (i + 2 < buf.size()) ? table[n & 0x3f] : '=';
                 }
 
                 return {{"filename", filename}, {"path", filePath},
                         {"sizeBytes", (int)fileSize},
-                        {"content", b64}, {"truncated", false}};
+                        {"offset", offset}, {"returnedBytes", buf.size()}, {"nextOffset", offset + buf.size()},
+                        {"hasMore", offset + buf.size() < fileSize}, {"content", b64}, {"truncated", offset + buf.size() < fileSize}};
             }, true);
 
         // ── C 组:CANCEL_JOB(取消正在运行的长任务:probe/dump)

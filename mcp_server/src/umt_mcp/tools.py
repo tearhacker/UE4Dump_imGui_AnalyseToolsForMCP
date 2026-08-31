@@ -21,6 +21,7 @@ from mcp.server.fastmcp.exceptions import ToolError
 
 from . import bridge as br
 from . import config, protocol as proto
+from . import response_budget
 
 # 函数名(snake_case) → 设备端命令名。仅列出不能直接转大写的（D 组读/写语序是反的）
 _CMD_ALIASES = {
@@ -75,6 +76,9 @@ def _dev(tool_name: str, timeout: float | None = None, **args: Any) -> str:
 
     None 参数一律不下发，让设备端用自己的默认值。
     """
+    budget = args.pop("budgetTokens", None)
+    brief = bool(args.pop("brief", False))
+    fields = args.pop("fields", None)
     payload = {k: v for k, v in args.items() if v is not None}
     cmd = _cmd(tool_name)
 
@@ -135,6 +139,8 @@ def _dev(tool_name: str, timeout: float | None = None, **args: Any) -> str:
                         sessions.append(session_id)
                         del sessions[:-config.CANDIDATE_SESSION_LIMIT]
 
+    if budget is not None or brief or fields is not None:
+        data = response_budget.envelope(data, budget_tokens=budget, brief=brief, fields=fields)
     return json.dumps(data, ensure_ascii=False, indent=2)
 
 
@@ -188,7 +194,9 @@ def attach() -> str:
 
 
 # ============================================================ C 流程与产出
-def start_probe() -> str:
+def start_probe(wait_ms: int | None = None, budget_tokens: int | None = None,
+                brief: bool | None = None, fields: list[str] | None = None,
+                plan_id: str | None = None) -> str:
     """启动引擎探测（定位 GNames / GUObjectArray / 偏移表）。
 
     这是几乎所有引擎语义命令的前置条件。
@@ -196,12 +204,16 @@ def start_probe() -> str:
     🔴 必须先 selectProcess（设备端从选中项取目标）。
     🔴 设备端不支持 waitMs 短等：本命令立即返回 started，需用 getProbeStatus 轮询。
     """
-    return _dev("start_probe")
+    return _dev("start_probe", waitMs=wait_ms, budgetTokens=budget_tokens,
+                brief=brief, fields=fields, planId=plan_id)
 
 
-def get_probe_status() -> str:
+def get_probe_status(job_id: str | None = None, wait_ms: int | None = None,
+                     budget_tokens: int | None = None, brief: bool | None = None,
+                     fields: list[str] | None = None) -> str:
     """查询探测进度（phase / percent / 是否完成）。startProbe 之后轮询这个。"""
-    return _dev("get_probe_status")
+    return _dev("get_probe_status", jobId=job_id, waitMs=wait_ms,
+                budgetTokens=budget_tokens, brief=brief, fields=fields)
 
 
 def get_probe_results() -> str:
@@ -209,17 +221,23 @@ def get_probe_results() -> str:
     return _dev("get_probe_results")
 
 
-def start_dump() -> str:
+def start_dump(probe_id: str | None = None, wait_ms: int | None = None,
+               budget_tokens: int | None = None, brief: bool | None = None,
+               fields: list[str] | None = None) -> str:
     """启动 SDK 转储。需先完成 startProbe。
 
     🔴 会先清空设备端输出目录（/sdcard/UnrealMemoryTools/<pkg>/）。
     """
-    return _dev("start_dump")
+    return _dev("start_dump", probeId=probe_id, waitMs=wait_ms,
+                budgetTokens=budget_tokens, brief=brief, fields=fields)
 
 
-def get_dump_status() -> str:
+def get_dump_status(job_id: str | None = None, wait_ms: int | None = None,
+                    budget_tokens: int | None = None, brief: bool | None = None,
+                    fields: list[str] | None = None) -> str:
     """查询转储进度。startDump / dumpSdk 之后轮询这个。"""
-    return _dev("get_dump_status")
+    return _dev("get_dump_status", jobId=job_id, waitMs=wait_ms,
+                budgetTokens=budget_tokens, brief=brief, fields=fields)
 
 
 def dump_unreal_library(source: str | None = None) -> str:
@@ -239,12 +257,15 @@ def dump_sdk(wait_ms: int | None = None) -> str:
     return _dev("dump_sdk", waitMs=wait_ms)
 
 
-def get_logs(since_index: int | None = None, max_lines: int | None = None) -> str:
+def get_logs(since_index: int | None = None, max_lines: int | None = None,
+             brief: bool | None = None, fields: list[str] | None = None,
+             budget_tokens: int | None = None) -> str:
     """拉取设备端日志（环形缓冲，上限 1500 行，超出丢最旧）。
 
     用 since_index 增量拉取，避免重复读。默认 50 行。
     """
-    return _dev("get_logs", sinceIndex=since_index, maxLines=max_lines)
+    return _dev("get_logs", sinceIndex=since_index, maxLines=max_lines,
+                brief=brief, fields=fields, budgetTokens=budget_tokens)
 
 
 def list_output_files(package: str | None = None) -> str:
@@ -255,20 +276,26 @@ def list_output_files(package: str | None = None) -> str:
     return _dev("list_output_files", package=package)
 
 
-def read_output_file(filename: str, package: str | None = None) -> str:
+def read_output_file(filename: str, package: str | None = None,
+                     offset: int | None = None, limit: int | None = None,
+                     mode: str | None = None, pattern: str | None = None,
+                     budget_tokens: int | None = None, brief: bool | None = None,
+                     fields: list[str] | None = None) -> str:
     """读取设备端产物文件内容。
 
     🔴 只用于小文件；几十 MB 的 SDK 文件一律走 adb pull，禁止整读进上下文。
     """
-    return _dev("read_output_file", filename=filename, package=package)
+    return _dev("read_output_file", filename=filename, package=package, offset=offset,
+                limit=limit, mode=mode, pattern=pattern, budgetTokens=budget_tokens,
+                brief=brief, fields=fields)
 
 
-def cancel_job() -> str:
+def cancel_job(job_id: str | None = None) -> str:
     """取消当前正在跑的重活。
 
     🔴 设备端不接受 jobId —— 只能取消当前那一个任务。
     """
-    return _dev("cancel_job")
+    return _dev("cancel_job", jobId=job_id)
 
 
 def apply_probe_overrides(overrides: dict[str, Any], pid: int | None = None,
@@ -288,12 +315,17 @@ def apply_probe_overrides(overrides: dict[str, Any], pid: int | None = None,
 
 
 # ============================================================ D 内存原语
-def read_memory(address: str, size: int) -> str:
+def read_memory(address: str, size: int, encoding: str | None = None,
+                summary: bool | None = None, cursor: str | None = None,
+                budget_tokens: int | None = None, brief: bool | None = None,
+                fields: list[str] | None = None) -> str:
     """读目标进程内存，返回 hex。
 
     address 用 "0x..." 字符串。size 上限 4096（单响应 ≤4K token 硬约束）。
     """
-    return _dev("read_memory", address=address, size=size)
+    return _dev("read_memory", address=address, size=size, encoding=encoding,
+                summary=summary, cursor=cursor, budgetTokens=budget_tokens,
+                brief=brief, fields=fields)
 
 
 def read_memory_value(address: str, value_type: str) -> str:
@@ -648,7 +680,7 @@ DEVICE_PARAMS: dict[str, frozenset[str]] = {
     "LIST_PROCESSES": frozenset({"dedicatedOnly"}),
     "GET_LOGS": frozenset({"sinceIndex", "maxLines"}),
     "GET_CAPABILITIES": frozenset(),
-    "MEMORY_READ": frozenset({"address", "size"}),
+    "MEMORY_READ": frozenset({"address", "size", "encoding", "summary", "cursor", "budgetTokens", "brief", "fields"}),
     "MEMORY_READ_VALUE": frozenset({"address", "valueType"}),
     "READ_STRING": frozenset({"address", "maxLen", "isWide"}),
     "LIST_MODULES": frozenset({"nameFilter", "includeSegments", "includeAnonymous",
@@ -716,7 +748,11 @@ def _sent_params(func: Any) -> tuple[str, set[str]]:
     m = re.search(r'_dev\(\s*"([a-z_]+)"\s*(?:,\s*(.*?))?\)', src, re.S)
     if not m:
         return "", set()
-    return m.group(1), set(re.findall(r"(\w+)\s*=", m.group(2) or ""))
+    sent = set(re.findall(r"(\w+)\s*=", m.group(2) or ""))
+    # Client-side envelope controls are consumed by _dev and are not device args.
+    sent -= {"brief", "fields", "budgetTokens", "waitMs", "jobId", "planId",
+             "probeId", "offset", "limit", "mode", "pattern", "encoding", "summary", "cursor"}
+    return m.group(1), sent
 
 def self_check() -> list[str]:
     """启动自检，防两类静默失效。
