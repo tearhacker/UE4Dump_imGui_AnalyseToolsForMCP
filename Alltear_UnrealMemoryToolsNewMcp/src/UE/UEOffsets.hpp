@@ -309,6 +309,10 @@ public:
     uintptr_t GetProcessEvent() const { return ProcessEvent; };
     UE_Offsets *GetOffsets() const { return Offsets; };
 
+    // setter —— APPLY_PROBE_OVERRIDES 注入运行时覆盖值时使用
+    void SetNamesPtr(uintptr_t p) { NamesPtr = p; };
+    void SetGUObjectsArrayPtr(uintptr_t p) { GUObjectsArrayPtr = p; };
+
     std::string GetNameByID(int32_t id) const;
 
     static std::string InitStatusToStr(UEVarsInitStatus s);

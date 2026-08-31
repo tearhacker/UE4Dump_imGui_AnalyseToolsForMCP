@@ -10,6 +10,8 @@
 #include <utility>
 #include <vector>
 
+#include "Protocol.hpp"  // kSessionIdleTimeoutMs / kSessionMaxHoldLimitMs
+
 namespace UmtMcp
 {
 
@@ -83,6 +85,6 @@ private:
 inline const int kSessionDefaultHoldMs = 3000;
 inline const int kSessionMaxHoldLimitMs = 30000;
 // 空闲看门狗：会话内无操作超过此值自动 detach
-inline const int kSessionIdleTimeoutMs = 30000;
+// （kSessionIdleTimeoutMs 定义在 Protocol.hpp:32，此处勿重复定义）
 
 }  // namespace UmtMcp

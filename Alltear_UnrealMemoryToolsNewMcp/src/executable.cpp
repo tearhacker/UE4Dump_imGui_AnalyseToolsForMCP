@@ -830,9 +830,9 @@ namespace
                 {
                     // key 命名约定:"names" → NamesPtr, "objects" → GUObjectsArrayPtr, "world" → 预留
                     if (kv.first == "names" || kv.first == "gnames")
-                        v->NamesPtr = kv.second;
+                        v->SetNamesPtr(kv.second);
                     else if (kv.first == "objects" || kv.first == "guobjectarray")
-                        v->GUObjectsArrayPtr = kv.second;
+                        v->SetGUObjectsArrayPtr(kv.second);
                     else
                         LOGW("未知的覆盖项 key: %s,已跳过", kv.first.c_str());
                 }
@@ -2328,33 +2328,33 @@ namespace
                 if (vars)
                 {
                     // NamesPtr = GNames 指针地址,value = 实际解引用后的值
-                    if (vars->NamesPtr != 0)
+                    if (vars->GetNamesPtr() != 0)
                     {
                         uintptr_t resolved = 0;
-                        bool ok = UEMemory::kMgr.readMem(vars->NamesPtr, &resolved, sizeof(resolved)) == sizeof(resolved);
+                        bool ok = UEMemory::kMgr.readMem(vars->GetNamesPtr(), &resolved, sizeof(resolved)) == sizeof(resolved);
                         if (ok && resolved != 0)
                         {
                             globals["gNamesPtr"] = UmtMcp::FormatAddress(resolved);
-                            globals["gNamesPtrAddr"] = UmtMcp::FormatAddress(vars->NamesPtr);
+                            globals["gNamesPtrAddr"] = UmtMcp::FormatAddress(vars->GetNamesPtr());
                             globals["namesMethod"] = "PROBE_RESULT";
                             hasAny = true;
                         }
                     }
-                    if (vars->GUObjectsArrayPtr != 0)
+                    if (vars->GetGUObjectsArrayPtr() != 0)
                     {
                         uintptr_t resolved = 0;
-                        bool ok = UEMemory::kMgr.readMem(vars->GUObjectsArrayPtr, &resolved, sizeof(resolved)) == sizeof(resolved);
+                        bool ok = UEMemory::kMgr.readMem(vars->GetGUObjectsArrayPtr(), &resolved, sizeof(resolved)) == sizeof(resolved);
                         if (ok && resolved != 0)
                         {
                             globals["guObjectArrayPtr"] = UmtMcp::FormatAddress(resolved);
-                            globals["guObjectArrayPtrAddr"] = UmtMcp::FormatAddress(vars->GUObjectsArrayPtr);
+                            globals["guObjectArrayPtrAddr"] = UmtMcp::FormatAddress(vars->GetGUObjectsArrayPtr());
                             globals["objectsMethod"] = "PROBE_RESULT";
                             hasAny = true;
                         }
                     }
-                    if (vars->ObjObjects_Objects != 0)
+                    if (vars->GetObjObjects_Objects() != 0)
                     {
-                        globals["objObjectsPtr"] = UmtMcp::FormatAddress(vars->ObjObjects_Objects);
+                        globals["objObjectsPtr"] = UmtMcp::FormatAddress(vars->GetObjObjects_Objects());
                         hasAny = true;
                     }
                 }
@@ -2365,13 +2365,13 @@ namespace
                     if (!globals.contains("gNamesPtr") && gProbeResult.profile)
                     {
                         auto *v2 = gProbeResult.profile->GetUEVars();
-                        if (v2 && v2->NamesPtr != 0)
+                        if (v2 && v2->GetNamesPtr() != 0)
                         {
                             uintptr_t r = 0;
-                            if (UEMemory::kMgr.readMem(v2->NamesPtr, &r, sizeof(r)) == sizeof(r) && r != 0)
+                            if (UEMemory::kMgr.readMem(v2->GetNamesPtr(), &r, sizeof(r)) == sizeof(r) && r != 0)
                             {
                                 globals["gNamesPtr"] = UmtMcp::FormatAddress(r);
-                                globals["gNamesPtrAddr"] = UmtMcp::FormatAddress(v2->NamesPtr);
+                                globals["gNamesPtrAddr"] = UmtMcp::FormatAddress(v2->GetNamesPtr());
                                 globals["namesMethod"] = "BACKFILL_PROBE";
                                 hasAny = true;
                             }
@@ -2432,7 +2432,10 @@ namespace
                     uintptr_t addr = 0;
                     if (!UmtMcp::ParseAddress(className, addr))
                         throw UmtMcp::HandlerError(UmtMcp::Err::kBadArgs, "className 格式无效: " + className);
-                    cls = objects->FindObjectByAddress(reinterpret_cast<void *>(addr)).Cast<UE_UClass>();
+                    UE_UObject uo(reinterpret_cast<void *>(addr));
+                    if (!objects->IsObject(uo))
+                        throw UmtMcp::HandlerError(UmtMcp::Err::kNotFound, "地址不在对象数组内: " + className);
+                    cls = uo.Cast<UE_UClass>();
                 }
                 else
                 {
@@ -2553,7 +2556,7 @@ namespace
                 if (maxCandidates < 1 || maxCandidates > 2000) maxCandidates = 200;
 
                 auto maps = KittyMemoryEx::getAllMaps(UEMemory::kMgr.processID());
-                std::vector<KittyMemoryEx::MemoryProtection> validRegions;
+                std::vector<KittyMemoryEx::ProcMap> validRegions;
                 for (const auto &m : maps)
                 {
                     if (!regionFilter.empty() && m.pathname.find(regionFilter) == std::string::npos)
@@ -2569,8 +2572,8 @@ namespace
                 size_t scannedBytes = 0;
                 for (const auto &reg : validRegions)
                 {
-                    uintptr_t start = reg.start;
-                    uintptr_t end = reg.end;
+                    uintptr_t start = static_cast<uintptr_t>(reg.startAddress);
+                    uintptr_t end = static_cast<uintptr_t>(reg.endAddress);
                     if (start % alignment != 0) start = ((start + alignment - 1) / alignment) * alignment;
                     for (uintptr_t addr = start; addr + sizeof(uintptr_t) <= end && (int)candidates.size() < maxCandidates; addr += alignment)
                     {
@@ -2665,9 +2668,9 @@ namespace
                 std::FILE *fp = std::fopen(filePath.c_str(), "rb");
                 if (!fp)
                     throw UmtMcp::HandlerError(UmtMcp::Err::kReadFailed, "无法打开文件: " + filePath);
-                std::fseek(fp, 0, std::SEEK_END);
+                std::fseek(fp, 0, SEEK_END);
                 long fsize = std::ftell(fp);
-                std::fseek(fp, 0, std::SEEK_SET);
+                std::fseek(fp, 0, SEEK_SET);
                 std::vector<char> buf(fsize);
                 std::fread(buf.data(), 1, fsize, fp);
                 std::fclose(fp);
@@ -2714,7 +2717,7 @@ namespace
         // ── C 组:APPLY_PROBE_OVERRIDES(在下次 START_PROBE 前注入自定义偏移)
         // 将 key→value 对存入 gProbeOverrides,START_PROBE 开头合并进 profile
         UmtMcp::CommandDispatcher::Register("APPLY_PROBE_OVERRIDES",
-            [&gProbeOverrides](const json &args) -> json
+            [](const json &args) -> json
             {
                 if (!UEMemory::kMgr.isMemValid())
                     throw UmtMcp::HandlerError(UmtMcp::Err::kNotAttached, "未 attach 到目标进程");
