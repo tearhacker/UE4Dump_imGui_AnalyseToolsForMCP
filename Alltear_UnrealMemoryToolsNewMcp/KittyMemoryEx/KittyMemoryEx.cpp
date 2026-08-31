@@ -1,5 +1,6 @@
 #include "KittyMemoryEx.hpp"
 #include "KittyIOFile.hpp"
+#include <cerrno>
 
 namespace KittyMemoryEx
 {
@@ -15,7 +16,11 @@ namespace KittyMemoryEx
         FILE *fp = fopen(filePath, "r");
         if (!fp)
         {
-            KITTY_LOGE("Couldn't open cmdline file %s, error=%s", filePath, strerror(errno));
+            // 扫描 /proc 时绝大多数进程属于其它 UID，或已在 readdir 与 fopen 之间退出，
+            // fopen 会失败：ENOENT=进程已消失、EACCES=无权限读取。这是预期噪声，静默跳过
+            // 不刷屏；只有其它类型的错误(如 EMFILE/ENFILE)才值得记录。
+            if (errno != ENOENT && errno != EACCES)
+                KITTY_LOGE("Couldn't open cmdline file %s, error=%s", filePath, strerror(errno));
             return "";
         }
 

@@ -600,7 +600,20 @@ namespace
         }
 
         if (gCandidates.empty())
-            PushUiLog('W', "未检测到正在运行的 Unreal Engine 进程。");
+        {
+            std::string knownGames;
+            for (size_t i = 0; i < UE_Games.size(); ++i)
+            {
+                if (i)
+                    knownGames += "、";
+                knownGames += UE_Games[i]->GetAppName();
+            }
+            PushUiLog('W',
+                      "未检测到正在运行的 Unreal Engine 进程。已自动扫描以下内置游戏,但当前均未运行:"
+                      + knownGames
+                      + "。若已启动游戏仍无显示,请确认游戏处于前台运行,且本工具有权限读取其 "
+                        "/proc/<pid>/cmdline(其它 UE4/UE5 通用进程也会走通用扫描分支)。");
+        }
         else
             PushUiLog('I', "检测到 " + std::to_string(gCandidates.size()) + " 个 Unreal Engine 进程。");
 
@@ -3978,9 +3991,6 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
         if (ImGui::Button("ZH", ImVec2(52.0f, 0.0f))) gUiLang = UiLang::ZH;
         ImGui::SameLine(0.0f, 6.0f);
         if (ImGui::Button("EN", ImVec2(52.0f, 0.0f))) gUiLang = UiLang::EN;
-        ImGui::SameLine(0.0f, 6.0f);
-        if (ImGui::Button(Tr("退出", "Exit"), ImVec2(78.0f, 0.0f)))
-            *main_thread_flag = false;
         ImGui::EndChild();
 
         ImGui::Dummy(ImVec2(0.0f, 12.0f));
@@ -4123,6 +4133,12 @@ void RenderAutoUEDumpPanel(bool *main_thread_flag)
         ImGui::TextWrapped("%s: %s", Tr("输出目录", "Output"), kOutputDirectory);
         ImGui::TextWrapped("%s: %s", Tr("渲染接口", "Renderer"), graphics->RenderName);
         ImGui::Text("%s: %.1f", Tr("当前 FPS", "Current FPS"), ImGui::GetIO().Framerate);
+
+        ImGui::Dummy(ImVec2(0.0f, 12.0f));
+        ImGui::Separator();
+        ImGui::Dummy(ImVec2(0.0f, 8.0f));
+        if (ImGui::Button(Tr("退出应用", "Exit App"), ImVec2(-1.0f, 48.0f)))
+            *main_thread_flag = false;
         ImGui::EndChild();
     }
     else if (navPage == NavOverview)
