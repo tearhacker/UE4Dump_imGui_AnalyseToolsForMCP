@@ -5,7 +5,7 @@
 >
 > 与另两份文档的分工：
 > - **本文档**：源码**有什么**（全量，不筛选）
-> - 《MCP工具功能规格》：最终**暴露给 AI 哪些**（精选 42 个）
+> - 《MCP工具功能规格》：最终**暴露给 AI 哪些**（43 个，含 ATTACH/DISASSEMBLE）
 > - 《开发必读架构》：**怎么写**（命名、协议、目录结构）
 
 **现状标记**
@@ -446,17 +446,23 @@ void UEDumper::Dump(std::unordered_map<std::string, BufferFmt> *outBuffersMap);
 
 ---
 
-## 尚未实现的能力（源码里没有）
+## 已完成的能力（源码里已有）
 
 | 能力 | 说明 |
 |---|---|
-| socket 命令服务 | `src/` 下 `AF_INET`/`bind`/`listen`/`accept` **零命中**；`main()` 在 `:1805-1813` 直接进 Vulkan 渲染阻塞循环 |
-| 任务取消 | `cancelRequested` / `atomic<bool>` 在 `src/` 非 imgui 部分 **零命中** |
-| 参数化扫描 | `GetNamesPtr()` 无参，范围/偏移全硬编码（**`GetGUObjectArrayPtr` 扫描方向 bug 已修，但签名仍无参**） |
-| 批量采样 | 采样点写死 `for (int i = 0; i < 5; i++)`（`Dumper.cpp:248` / `:267`） |
-| 偏移编辑 UI | 不存在 |
-| profile 管理 UI | 不存在 |
-| 配置持久化 | 不存在（`AndroidImgui.cpp:20` `io.IniFilename = nullptr`） |
+| ✅ socket 命令服务 | `src/mcp/CommandServer.cpp`：`bind(127.0.0.1, 27185)` + `listen(1)` + `accept`，NDJSON 分帧，Token 鉴权，心跳 2s/超时 120s |
+| ✅ 任务取消 | `executable.cpp:156` `gCancelRequested` + `CANCEL_JOB`(:2696)，ExecuteProbe/Dump 有检查点 |
+| ✅ 43 条 MCP 命令 | A~I 组全覆盖，内联注册（未外迁） |
+
+## 设计上选择不做（非 bug）
+
+| 能力 | 说明 |
+|---|---|
+| 参数化扫描 | `GetNamesPtr()` 无参；`GetGUObjectArrayPtr` 双向扫描已修，签名仍无参（约定设计） |
+| 批量采样 | 采样点写死 5（`Dumper.cpp:248`/`:267`），不影响 MCP 命令调用 |
+| 偏移编辑 UI | 不存在（UI 层，非服务端范围） |
+| profile 管理 UI | 不存在（UI 层，非服务端范围） |
+| 配置持久化 | `AndroidImgui.cpp:20` `io.IniFilename = nullptr` |
 | 命令行参数 | `src/Utils/KittyCmdln.cpp` 框架存在但 `main()` 无参不解析 argv —— **死代码** |
 
 ---

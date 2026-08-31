@@ -66,7 +66,7 @@
 
 # 第一部分　工具设计规范
 
-## 1.1 工具清单（v1.2 定稿，42 个）
+## 1.1 工具清单（v1.2 定稿，43 个）
 
 > 命名 camelCase（依据最佳实践 1.1，GPT-4o tokenization 更省：`memoryRead` 2 token vs `memory_read` 3 token）
 
@@ -209,10 +209,10 @@ scanPattern — 按字节特征码（IDA 风格，支持 ? 通配）在目标进
 
 ## 1.7 工具总数与上下文预算（**v1.2 重算**）
 
-> v1.1 只算了 description（约 10K），漏算了 **outputSchema（每项 200–500 token × 42 = 另加 8–20K）**。
+> v1.1 只算了 description（约 10K），漏算了 **outputSchema（每项 200–500 token × 43 = 另加 8–20K）**。
 > 真实常驻上下文 **25–35K token**（issue #6）。
 
-**42 个工具**（v1.1 标题"41"为笔误，A2+B2+C11+D7+E2+F5+G8+H3+I2 = 42）。
+**43 个工具**（v1.1 标题"41"为笔误，A2+B2+C11+D7+E2+F5+G8+H3+I2 = 43，含 ATTACH + DISASSEMBLE）。
 
 - **硬上限：45 个工具**（不变）
 - **常驻 ≤ 25 个**：核心 20 个常驻；F 组（ptrace）/ E 组（`decodeAdrl` 等 PC 侧重活）靠
@@ -625,7 +625,7 @@ result = self._client.call(command)
 
 **2. Pydantic 生成的 schema 必须与文档一致**
 
-42 个工具手写 `inputSchema`/`outputSchema` 极易与实现漂移。
+43 个工具手写 `inputSchema`/`outputSchema` 极易与实现漂移。
 用类型注解 + Pydantic 自动生成，再写单测**反过来校验文档里的 JSON Schema**。
 
 ### 骨架
@@ -820,7 +820,7 @@ Andriod_UnrealMemoryTools/
 # 第六部分　落地检查清单
 
 ### 工具定义
-- [ ] 全部 camelCase，与 §1.1 一致（42 个，不超 45）
+- [ ] 全部 camelCase，与 §1.1 一致（43 个，不超 45）
 - [ ] 每个工具有中文 `title`
 - [ ] 描述含 `<use_case>` + `<important_notes>` + 中文同义词 + 下一步指引
 - [ ] **每个工具有 `outputSchema`** 且与 `structuredContent` 严格一致
