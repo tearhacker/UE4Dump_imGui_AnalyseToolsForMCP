@@ -297,6 +297,12 @@ void CommandServer::ServerLoop()
     running_.store(true);
     LOGI("[MCP] 命令服务已启动 %s:%u", bindAddress_.c_str(), port_);
 
+    // 连接事件合并：若断开后极短时间内又连上（重连风暴），降级为单行「重连」，
+    // 避免 IMGUI 日志被「已连接/已断开」成对刷屏
+    static time_t s_lastConnectTs = 0;
+    static time_t s_lastDisconnectTs = 0;
+    constexpr int kConnCoalesceSec = 5;  // 间隔小于此值视为同一会话的反复重连
+
     while (!stopRequested_.load())
     {
         // 带超时等待连接，便于响应 Stop()
@@ -315,7 +321,15 @@ void CommandServer::ServerLoop()
         if (clientFd < 0)
             continue;
 
-        LOGI("[MCP·连接] 客户端已连接");
+        {
+            const time_t now = std::time(nullptr);
+            // 🔴 重连风暴合并：距上次断开 < 阈值 → 只记一行「重连」，不重复「已连接」
+            if ((now - s_lastDisconnectTs) < kConnCoalesceSec)
+                LOGI("[MCP·连接] 重连（距上次断开 %lds）", (long)(now - s_lastDisconnectTs));
+            else
+                LOGI("[MCP·连接] 客户端已连接");
+            s_lastConnectTs = now;
+        }
         // 🔴 新连接:清空队列,丢弃上一连接的未消费响应(防止孤儿响应污染)
         CommandDispatcher::Clear();
 
@@ -400,7 +414,14 @@ void CommandServer::ServerLoop()
         }
 
         ::close(clientFd);
-        LOGI("[MCP·连接] 客户端断开");
+        {
+            const time_t now = std::time(nullptr);
+            // 仅当本次连接曾持续一段时间，才单独记「断开」；
+            // 否则它会被下一次「重连」行概括，避免成对刷屏
+            if ((now - s_lastConnectTs) >= kConnCoalesceSec)
+                LOGI("[MCP·连接] 客户端断开");
+            s_lastDisconnectTs = now;
+        }
     }
 
     ::close(serverFd);
