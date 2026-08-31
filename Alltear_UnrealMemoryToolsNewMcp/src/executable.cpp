@@ -4277,7 +4277,7 @@ static std::string GetLanIp()
 // ---- 音量键隐藏/显示菜单 ----
 // MemuSwitch: true=显示菜单, false=隐藏。默认显示，音量上=显示, 音量下=隐藏。
 // 若想默认隐藏(更隐蔽)，把下面的 {true} 改成 {false} 即可。
-static std::atomic<bool> MemuSwitch{true};
+std::atomic<bool> MemuSwitch{true};
 static std::atomic<bool> volume_thread_running{false};
 static std::thread* volume_thread = nullptr;
 
@@ -4445,9 +4445,8 @@ int main()
         if (permeate_record == false)
             android::ANativeWindowCreator::ProcessMirrorDisplay();
         graphics->NewFrame();
-        // 菜单默认显示；MemuSwitch=false 时跳过绘制即隐藏（窗口本身仍保持透明叠加）
-        if (MemuSwitch.load())
-            Layout_tick_UI(&flag);
+        // 菜单隐藏判断已迁到 Layout_tick_UI 内部（ImGui::Begin 窗口层），这里每帧无条件调用
+        Layout_tick_UI(&flag);
         // MCP：每帧 poll 一次命令队列（主线程执行，保证与 UMT 全局状态串行）
         UmtMcp::CommandDispatcher::PollOnce();
         graphics->EndFrame();

@@ -8,7 +8,9 @@
    
 #include "My_icon/pic_ZhenAiKun_png.h"
 
+#include <atomic>
 extern void RenderAutoUEDumpPanel(bool *main_thread_flag);
+extern std::atomic<bool> MemuSwitch; // 音量+ 显示 / 音量- 隐藏 菜单（定义于 executable.cpp）
 
 bool permeate_record = false;
 bool permeate_record_ini = false;
@@ -99,6 +101,11 @@ void drawBegin() {
 
 
 void Layout_tick_UI(bool *main_thread_flag) {
+    // 菜单隐藏（音量-）：跳过整个 ImGui 窗口的创建与渲染；
+    // ImGui 帧仍由主循环 graphics->NewFrame()/EndFrame() 每帧配对，不会失衡。
+    // 这样隐藏判断放在 ImGui::Begin 这一层，而不是在 main 里跳过整个 Layout_tick_UI。
+    if (!MemuSwitch.load())
+        return;
     { 
         ImGui::SetNextWindowSize(ImVec2(1280.0f, 960.0f), ImGuiCond_FirstUseEver);
         ImGui::SetNextWindowPos(ImVec2(90.0f, 110.0f), ImGuiCond_FirstUseEver);
