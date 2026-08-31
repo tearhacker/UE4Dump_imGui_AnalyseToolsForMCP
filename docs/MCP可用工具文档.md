@@ -4,7 +4,7 @@
 > 与设备端（`Alltear_UnrealMemoryToolsNewMcp`）实际注册的 47 条命令一一对应。
 > 内容以 `mcp_server/src/umt_mcp/tools.py` 与设备端 `src/executable.cpp` 的真实实现为准。
 
-- 文档版本：1.2（2026-08-31）
+- 文档版本：1.3（2026-08-31）
 - 协议版本：1（`config.PROTOCOL_VERSION`）
 - 服务端：Python `FastMCP`（stdio），工具名对外为 **camelCase**
 - 设备端：Android/C++ 命令服务，`127.0.0.1:35515`，经 `adb forward` 暴露
@@ -28,7 +28,7 @@ UMT 引擎语义层（GNames / GUObjectArray / SDK Dump / ptrace）
 
 - **工具名**：MCP 工具名是 camelCase（如 `readMemory`），设备端命令是 UPPER_SNAKE（如 `MEMORY_READ`），两层不同名，由 PC 侧自动映射。
 - **参数名**：MCP 参数保持 Python 侧 snake_case（如 `confirm_dangerous`），下发到设备端时自动转为设备端读取的 camelCase 键（如 `confirmDangerous`）。
-- **启动自检**：服务启动时执行 `self_check()`，校验命令名存在、参数键无拼写错误、设备端命令无漏暴露、工具总数 ≤ 45。自检不通过直接退出。
+- **启动自检**：服务启动时执行 `self_check()`，校验命令名存在、参数键无拼写错误、设备端命令无漏暴露、工具总数 ≤ 47。自检不通过直接退出。
 
 ---
 
@@ -56,6 +56,7 @@ python server.py
 
 - 一律使用 `"0x..."` 字符串，**不要用数字**。
 - 示例：`readMemory(address="0x7a3b4000", size=64)`
+- `slotAddress` 表示全局槽位，`valueAddress` 表示槽位内容，`objectsAddress` 表示对象表/Chunk 表；三者不能混作对象实例地址。
 
 ### 3.2 valueType 枚举（readMemoryValue）
 
@@ -85,14 +86,20 @@ args 中每个元素都是**字符串**：
 - Python 侧为 `None` 的参数一律**不下发**，由设备端使用自己的默认值。
 - 响应统一为格式化 JSON 字符串（`json.dumps(indent=2)`）。
 
-### 3.6 体积约束
+### 3.6 Probe 与对象有效性
+
+- Probe 成功表示名称池、对象数组布局以及至少一个真实 UObject 样本均已通过验证；只有结构偏移被识别但对象样本为空时，不应继续调用 `searchClasses`。
+- 对象表存储和首 chunk 必须位于 writable mapping。`r-x`/`r--` 映射中的“指针”通常是代码或只读数据，必须作为候选误报丢弃。
+- `scanObjects` 返回的 `mapRevision` 绑定当前进程映射。进程重启或 maps revision 改变后，旧 `sessionId`、`candidateId` 和 override 失效。
+
+### 3.7 体积约束
 
 - 单工具响应 ≤ 4K token（硬约束）。
 - `readMemory` size 上限 **4096**。
 - `getLogs` 默认 50 行。
 - 大文件（几十 MB 的 SDK 产物）一律走 `adb pull`，**禁止**用 `readOutputFile` 整读进上下文。
 
-### 3.7 长任务与分页
+### 3.8 长任务与分页
 
 - 大范围 `scanPattern`、`searchMemory`、`findReferences`、候选扫描和 `locateEngineGlobals` 传 `async_mode=true`。
 - 工具立即返回 `jobId`；用 `getDumpStatus` 轮询 `jobs`，最新完成任务的结果位于 `jobs[-1].result`。
@@ -101,7 +108,7 @@ args 中每个元素都是**字符串**：
 
 ---
 
-## 4. 工具总表（45 个）
+## 4. 工具总表（47 个）
 
 | 分组 | MCP 工具名 | 设备端命令 | 一句话说明 |
 |---|---|---|---|
@@ -503,13 +510,13 @@ attach-only 结构扫描 FNamePool，逐布局返回候选评分、证据、失�
 ```json
 { "tool": "sampleObjects", "startIndex": 0, "count": 32 }
 ```
-抽样读 GUObjectArray 对象。快命令。
+抽样读 GUObjectArray 对象。快命令。默认使用 Probe 已验证的对象布局；也可传 `source: "CANDIDATE"`、`sessionId`、`candidateId` 读取候选 session。每个样本返回 `objectAddress`、`classAddress`、`nameId`、`name`、`outerAddress` 和 `valid`；`valid=false` 时不得继续用于类分析。
 
 #### scanObjects
 ```json
 { "tool": "scanObjects", "source": "CANDIDATE", "region": "MODULE_RW", "async_mode": true }
 ```
-结构预筛 flat/chunked GUObjectArray，返回评分、证据、失败检查和候选 session。可传
+结构预筛 flat/chunked GUObjectArray，只接受 writable 对象表/首 chunk，并验证真实 UObject、ClassPrivate 和 NamePrivate。返回评分、证据、失败检查和候选 session。可传
 `names_session_id` + `names_candidate_id` 增强名字评分；使用 cursor/limit 续页。
 
 #### searchClasses
@@ -524,14 +531,15 @@ attach-only 结构扫描 FNamePool，逐布局返回候选评分、证据、失�
 ```json
 { "tool": "describeClass", "className": "APlayerController" }
 ```
-- `className`（必填 str）。
-取 UClass 完整定义：字段（**递归父类**）、函数签名、Size / 对齐 / CDO。
+- `className`（按名称查询时必填 str），由 PC 侧转换为设备端 `name` 参数。
+- 也可直接传 `address: "0x..."`；此模式不依赖 GUObjectArray 全量遍历，适合已有 UClass 地址的场景。
+- 取 UClass 完整定义：字段（**递归父类**）、函数签名、Size / 对齐 / CDO。
 
 #### inspectObject
 ```json
 { "tool": "inspectObject", "address": "0x7a3b4000" }
 ```
-读 UObject 实例的运行时字段值。🔴 Array/Set/Map 只回 Count/Max/Data 摘要，不展开元素。
+读指定 UObject 实例的运行时标识、类、Outer、索引和标志。该命令只要求已 `attach`，不再强制要求 GUObjectArray 全量遍历可用。🔴 Array/Set/Map 只回 Count/Max/Data 摘要，不展开元素。
 
 ---
 
@@ -668,6 +676,12 @@ selectProcess → attach → startProbe → getProbeStatus
   → analyzeClass("APlayerController")  // 深度分析，用 getDumpStatus 跟踪
 ```
 
+已有 UClass 或 UObject 地址时，可以绕过名称索引：
+
+```text
+attach → describeClass(address="0x...") → inspectObject(address="0x...")
+```
+
 ### 6.3 ARM64 反编译
 
 ```text
@@ -688,7 +702,20 @@ listModules → resolveSymbol("GWorld")        // 有符号时
   → followPointerChain(base, offsets)        // 逐级解引用
 ```
 
-### 6.5 远程调用（危险，谨慎）
+### 6.5 对象数组排障
+
+```text
+listModules(include_segments=true, include_anonymous=true)
+  → scanObjects(source="CANDIDATE", region="MODULE_RW", async_mode=true)
+  → getDumpStatus 轮询 scan_objects job
+  → sampleObjects(source="CANDIDATE", session_id, candidate_id)
+  → applyProbeOverrides（绑定当前 pid/startTime/mapRevision）
+  → startProbe → sampleObjects → searchClasses
+```
+
+候选的 `objectsAddress` 或首 chunk 落在 `r-x`/`r--` 映射时必须丢弃。maps revision 变化后，旧的 `sessionId`、`candidateId` 和 override 不能继续使用，应重新获取 maps 并扫描。
+
+### 6.6 远程调用（危险，谨慎）
 
 ```text
 推荐：callRemoteFunctionBatch(address, argSets)   // 无状态，用完即 detach
@@ -725,3 +752,5 @@ listModules → resolveSymbol("GWorld")        // 有符号时
 6. **响应体积硬约束 4K token**：超大结果被截断或要求分页，大文件一律 adb pull。
 7. **`describeClass` 的 Array/Set/Map 字段只回摘要**，不展开元素。
 8. **strip 过的 ELF 无符号**：`resolveSymbol` 会失败，回退 `scanPattern`。
+9. **对象表布局验证**：服务端同时支持 flat/chunked 读取，但最终仍以 `UObject`、`ClassPrivate`、`NamePrivate` 三项验证为准；仅有可读指针或合理 `NumElements` 不足以证明候选有效。
+10. **直接地址分析**：`describeClass(address=...)` 和 `inspectObject(address=...)` 可在对象全量枚举失败时使用；按名称的 `searchClasses`/`describeClass(className=...)` 仍需要有效对象索引。
