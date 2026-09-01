@@ -3,6 +3,8 @@
 > **AI-driven UE4/UE5 memory analysis toolkit**: automatic engine global detection, memory scanning, SDK dump, ARM64 disassembly/decompilation, remote function calls.
 >
 > License: **GPL-3.0** (commercial use allowed; modifications must be open-sourced)
+>
+> 📌 **Primary development branch: `tearue4mcp`** (all latest features, docs, and build artifacts target this branch)
 
 ---
 
@@ -56,6 +58,8 @@ Target game process (com.tencent.letsgo / com.tencent.tmgp.pubgmhd / ...)
 
 ## 📁 Project Structure
 
+> Paths below are based on the **`tearue4mcp`** branch (current primary). Other branches (`master`, `dev-*`) are for reference or historical versions only.
+
 ```
 ue4ImGuiAutoWorkingMcpBytear/
 ├── LICENSE                           # GPL-3.0 license (modifications must be open-sourced)
@@ -99,6 +103,8 @@ ue4ImGuiAutoWorkingMcpBytear/
 ---
 
 ## 🔧 Build & Run
+
+> Build steps below target the **`tearue4mcp`** branch. Commit or stash changes before switching branches.
 
 ### Device Side (Android C++)
 
@@ -210,3 +216,4 @@ python server.py
 
 *Project dates: 2026-08-29 ~ 2026-09-01*
 *Maintained by: 泪心安卓领域基本盘技术*
+*Current primary branch: `tearue4mcp`*

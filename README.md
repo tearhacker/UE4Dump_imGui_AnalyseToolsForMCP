@@ -3,6 +3,8 @@
 > **AI 驱动的 UE4/UE5 内存分析工具集**：自动定位引擎全局、内存扫描、SDK Dump、ARM64 反汇编/反编译、远程函数调用。
 >
 > 协议：**GPL-3.0**（允许商用，修改后必须开源）
+>
+> 📌 **主开发分支：`tearue4mcp`**（所有最新功能、文档、构建产物均以此分支为准）
 
 ---
 
@@ -56,6 +58,8 @@ Alltear_UnrealMemoryToolsNewMcp/   (Android ELF, C++ NDK27)
 
 ## 📁 项目结构
 
+> 以下路径描述以 `tearue4mcp` 分支为基准。其他分支（如 `master`、`dev-*`）仅供参考或历史版本。
+
 ```
 ue4ImGuiAutoWorkingMcpBytear/
 ├── LICENSE                           # GPL-3.0 许可证（修改必须开源）
@@ -91,6 +95,8 @@ ue4ImGuiAutoWorkingMcpBytear/
 ---
 
 ## 🔧 构建与运行
+
+> 以下构建步骤均以 `tearue4mcp` 分支为准。切换分支前请提交或暂存当前改动。
 
 ### 设备端（Android C++）
 
@@ -201,3 +207,4 @@ python server.py
 
 *项目日期：2026-08-29 ~ 2026-09-01*
 *维护：泪心安卓领域基本盘技术*
+*当前主分支：`tearue4mcp`*
