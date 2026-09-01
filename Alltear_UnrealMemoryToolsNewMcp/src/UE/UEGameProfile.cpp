@@ -903,6 +903,16 @@ std::string IGameProfile::GetNameEntryString(uint8_t *entry) const
         size_t tryLen = offsets->FNamePoolEntry.GetLength(header);
         if (tryLen == 0 && (header >> 1) == 0)
         {
+            // 结构上确认这是 FNAME_OUTLINE_NUMBER 的外链 entry：
+            // 运行时把开关自愈置 true（仅 outline 模式的游戏才会走到这里，
+            // 4.26+ 非 outline 游戏不受影响），保证后续 UE_FName::GetName/
+            // GetNumber 不再误读 FName.Number（LetsGo 的 FName 仅 4 字节）。
+            if (!offsets->Config.isUsingOutlineNumberName)
+            {
+                offsets->Config.isUsingOutlineNumberName = true;
+                LOGI("[Bootstrap] FNamePool: detected FNAME_OUTLINE_NUMBER outlined entry, enabling outline-name mode");
+            }
+
             const uintptr_t stringOff =
                 offsets->FNamePoolEntry.Header + sizeof(int16_t);
             const uintptr_t entryIdOff = stringOff + ((stringOff == 6) * 2);
