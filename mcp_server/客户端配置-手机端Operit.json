@@ -1,15 +1,19 @@
 {
   "mcpServers": {
-    "ue4dump-mcp": {
-      "command": "python3",
+    "ue4dump_mcp": {
       "args": [
-        "/root/umt_mcp/server.py",
+        "server.py",
         "--no-adb",
         "--host",
         "127.0.0.1",
         "--port",
         "35515"
-      ]
+      ],
+      "autoApprove": [],
+      "command": "venv/bin/python",
+      "disabled": false,
+      "env": {}
     }
-  }
+  },
+  "pluginMetadata": {}
 }

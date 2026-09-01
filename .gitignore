@@ -12,3 +12,15 @@ Alltear_UnrealMemoryToolsNewMcp/outputs/
 venv/
 __pycache__/
 *.pyc
+
+# Python 打包产物
+dist/
+*.spec
+*.egg-info/
+*.egg
+
+# 构建产物
+build/
+
+# 临时文件
+*.zip
