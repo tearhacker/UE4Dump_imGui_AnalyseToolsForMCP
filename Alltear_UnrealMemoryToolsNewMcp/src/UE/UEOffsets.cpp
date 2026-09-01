@@ -468,7 +468,10 @@ namespace UE_DefaultOffsets
         {
             once = true;
 
-            offsets.TUObjectArray.NumElements = (sizeof(void *) * 2) + sizeof(int32_t);
+            // UE4.2x: FChunkedFixedUObjectArray layout is [Objects*][Max][Count],
+            // so NumElements is at offset 0x10 (after Objects ptr + 2×int32).
+            // UE5+ moved it to 0x14; keep 0x10 here for 4.2x.
+            offsets.TUObjectArray.NumElements = sizeof(void *) + (sizeof(int32_t) * 3);  // 0x10
             offsets.TUObjectArray.NumElementsPerChunk = 65 * 1024;
         }
         return offsets;
@@ -567,7 +570,8 @@ namespace UE_DefaultOffsets
             offsets.FUObjectArray.ObjObjects = sizeof(int32_t) * 4;
 
             offsets.TUObjectArray.Objects = 0;
-            offsets.TUObjectArray.NumElements = (sizeof(void *) * 2) + sizeof(int32_t);
+            // UE4.2x: NumElements at 0x10 (Objects ptr + Max + Count + NextChunk).
+            offsets.TUObjectArray.NumElements = sizeof(void *) + (sizeof(int32_t) * 3);  // 0x10
             offsets.TUObjectArray.NumElementsPerChunk = 64 * 1024;
 
             offsets.FUObjectItem.Object = 0;
@@ -691,7 +695,8 @@ namespace UE_DefaultOffsets
             offsets.FUObjectArray.ObjObjects = sizeof(int32_t) * 4;
 
             offsets.TUObjectArray.Objects = 0;
-            offsets.TUObjectArray.NumElements = (sizeof(void *) * 2) + sizeof(int32_t);
+            // UE5.00+: NumElements at 0x14 (Objects ptr + Max + Count + NextChunk).
+            offsets.TUObjectArray.NumElements = (sizeof(void *) * 2) + sizeof(int32_t);  // 0x14 for UE5
             offsets.TUObjectArray.NumElementsPerChunk = 64 * 1024;
 
             offsets.FUObjectItem.Object = 0;

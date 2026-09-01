@@ -571,6 +571,9 @@ json ScanGNamesCandidates(const json &args, const KittyMemoryMgr &mgr, const std
         for (const auto &off : args["anchorOffsets"])
             if (off.is_number_unsigned() || off.is_number_integer()) anchorOffsets.push_back(off.get<uint32_t>());
     }
+    // Convert byte offsets to unit offsets (÷ stride) since DecodeNameAt multiplies by stride.
+    for (auto &o : anchorOffsets)
+        o = o / layouts[0].stride;
     std::unordered_set<std::string> anchorNames = {"None", "ByteProperty", "IntProperty", "Object"};
     for (const auto &name : args.value("anchorNames", json::array()))
         if (name.is_string()) anchorNames.insert(name.get<std::string>());
