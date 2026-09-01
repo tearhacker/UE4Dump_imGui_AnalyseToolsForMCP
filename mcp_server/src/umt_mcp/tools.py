@@ -91,10 +91,10 @@ def _dev(tool_name: str, timeout: float | None = None, **args: Any) -> str:
         # 自动附加最近设备端日志，帮助 AI 定位失败原因（无需主动调用 get_logs）
         log_ctx = ""
         try:
-            recent = br._logs  # peek，不消费
+            recent = br.get_bridge().peek_logs(20)  # 线程安全的只读预览
             if recent:
                 log_ctx = "\n\n[设备端最近日志]\n" + "\n".join(
-                    l.get("msg", "") for l in list(recent)[-20:]
+                    l.get("msg", "") for l in recent
                 )
         except Exception:
             pass  # 不阻塞错误路径

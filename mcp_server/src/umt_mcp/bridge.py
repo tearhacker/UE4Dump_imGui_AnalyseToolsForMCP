@@ -114,6 +114,16 @@ class UmtBridge:
             self._logs.clear()
         return logs
 
+    def peek_logs(self, n: int | None = None) -> list[dict]:
+        """只读预览最近 N 条日志（不消费，不阻塞 drain_logs）。
+
+        n=None 返回全部，默认 20 条以避免大字符串。
+        """
+        with self._lock:
+            if n is None:
+                return list(self._logs)
+            return list(self._logs)[-n:]
+
     # ------------------------------------------------------------ 连接
     def connect(self, max_attempts: int | None = 1) -> None:
         """建立连接并校验 HELLO 协议版本。失败按指数退避重试。
