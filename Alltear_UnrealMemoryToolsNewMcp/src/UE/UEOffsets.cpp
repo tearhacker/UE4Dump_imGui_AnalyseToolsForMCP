@@ -561,10 +561,20 @@ namespace UE_DefaultOffsets
             offsets.FNamePoolEntry.Header = bWITH_CASE_PRESERVING_NAME ? 4 : 0;  // Offset to name entry header
             offsets.FNamePoolEntry.GetIsWide = [](uint16_t header)
             { return (header & 1) != 0; };
-            // usually if stride is 2 then header >> 6 and if 4 then haeder >> 1
+            // 自动识别 FNameEntryHeader 布局，保持 UE4.22-UE5 全兼容：
+            //   UE4.22-4.25 : uint32 header, Len = header >> 6
+            //   UE4.26+     : uint16 header, Len = header >> 1
+            // case-preserving 时 header 布局固定为 16 位。
+            // 注意：不能只按 stride 2->>>6 / 4->>>1 的旧规则，UE4.26 起 stride 仍为
+            // 2 但 header 已压缩为 16 位（腾讯魔改 UE4.26 LetsGo 即为此类）。
             offsets.FNamePoolEntry.GetLength = [bWITH_CASE_PRESERVING_NAME](uint16_t header) -> size_t
             {
-                return bWITH_CASE_PRESERVING_NAME ? header >> 1 : header >> 6;
+                if (bWITH_CASE_PRESERVING_NAME)
+                    return static_cast<size_t>(header >> 1);
+                size_t len = static_cast<size_t>(header >> 6);   // 32 位 header (4.22-4.25)
+                if (len == 0)
+                    len = static_cast<size_t>(header >> 1);      // 16 位 header (4.26+)
+                return len;
             };
 
             offsets.FUObjectArray.ObjObjects = sizeof(int32_t) * 4;
@@ -687,9 +697,15 @@ namespace UE_DefaultOffsets
             offsets.FNamePoolEntry.GetIsWide = [](uint16_t header)
             { return (header & 1) != 0; };
             // usually if stride is 2 then header >> 6 and if 4 then haeder >> 1
+            // (UE5 全系均为 16 位 header：Len = header >> 1，低版本兼容由 >>6 回退)
             offsets.FNamePoolEntry.GetLength = [bWITH_CASE_PRESERVING_NAME](uint16_t header) -> size_t
             {
-                return bWITH_CASE_PRESERVING_NAME ? header >> 1 : header >> 6;
+                if (bWITH_CASE_PRESERVING_NAME)
+                    return static_cast<size_t>(header >> 1);
+                size_t len = static_cast<size_t>(header >> 6);   // 32 位 header (4.22-4.25)
+                if (len == 0)
+                    len = static_cast<size_t>(header >> 1);      // 16 位 header (4.26+/UE5)
+                return len;
             };
 
             offsets.FUObjectArray.ObjObjects = sizeof(int32_t) * 4;

@@ -893,8 +893,15 @@ std::string IGameProfile::GetNameEntryString(uint8_t *entry) const
                         sizeof(int16_t)))
             return "";
 
-        if (isUsingOutlineNumberName() &&
-            offsets->FNamePoolEntry.GetLength(header) == 0)
+        // 自动识别 FNameEntryHeader 布局（保持 UE4.22-UE5 全兼容）：
+        //   UE4.22-4.25 : uint32 header, Len = header >> 6（GetLength 已自动识别）
+        //   UE4.26+     : uint16 header, Len = header >> 1
+        //   FNAME_OUTLINE_NUMBER（含腾讯魔改 UE4，如 LetsGo/元梦之星）：
+        //     Len==0 的 entry 是"外链"记录，布局为 Header(2)+NextEntryId(4)+Number(4)，
+        //     真实名字由 NextEntryId 指向。此前被 isUsingOutlineNumberName() 开关
+        //     挡住（UE4.25-4.27 档案硬编码 false），改为纯结构自动识别。
+        size_t tryLen = offsets->FNamePoolEntry.GetLength(header);
+        if (tryLen == 0 && (header >> 1) == 0)
         {
             const uintptr_t stringOff =
                 offsets->FNamePoolEntry.Header + sizeof(int16_t);
@@ -910,7 +917,10 @@ std::string IGameProfile::GetNameEntryString(uint8_t *entry) const
                 return "";
         }
 
-        strLen = std::min<size_t>(offsets->FNamePoolEntry.GetLength(header), kMAX_UENAME_BUFFER);
+        strLen = offsets->FNamePoolEntry.GetLength(header);
+        if (strLen == 0)
+            strLen = static_cast<size_t>(header >> 1);  // 16 位 header 兜底
+        strLen = std::min<size_t>(strLen, kMAX_UENAME_BUFFER);
         if (strLen <= 0)
             return "";
 
@@ -1176,6 +1186,20 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
             LOGI("[Bootstrap] GUObject @ 0x%lx (%s/Objects=0x%lx, anchorHits=%d, verified %d slots)",
                  (unsigned long)candObjAddr, direction, (unsigned long)objects, anchorHits, kVerifySlots);
             return candObjAddr;
+        }
+
+        // 内存条件全部通过但锚点未命中：打印诊断（只打前 5 个，避免刷屏）。
+        // 主要用途：真机复测时确认对象槽位地址 / FName index / 名字解析是否正确。
+        static int sDiagCount = 0;
+        if (sDiagCount < 5)
+        {
+            ++sDiagCount;
+            const int32_t id0 = (firstObj >= 0x10000)
+                ? vm_rpm_ptr<int32_t>((const void *)(firstObj + namePrivateOff)) : -1;
+            const std::string s0 = (id0 > 0 && id0 <= 0x200000) ? GetNameByID(id0) : "";
+            LOGI("[Bootstrap] verifyCandidate(mem-ok,name-fail): cand=0x%lx objects=0x%lx chunk0=0x%lx obj0=0x%lx id=%d name='%s'",
+                 (unsigned long)candObjAddr, (unsigned long)objects,
+                 (unsigned long)chunk0, (unsigned long)firstObj, id0, s0.c_str());
         }
         return 0;
     };
