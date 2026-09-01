@@ -757,8 +757,9 @@ UEVarsInitStatus IGameProfile::InitUEVars()
     if (!kPtrValidator.isPtrReadable(_UEVars.GUObjectsArrayPtr))
         return UEVarsInitStatus::ERROR_INIT_GUOBJECTARRAY;
 
-    if (!_addressOverrides.hasObjectLayout)
-        BootstrapCoreObjectArrayOffsets(_UEVars.pGetNameByID, pOffsets, _UEVars.GUObjectsArrayPtr);
+    // 与原始 AutoFix 路径保持一致：即使 MCP 提供了布局提示，也必须经过
+    // 运行时对象数组布局探测，不能让未经验证的 override 绕过校验。
+    BootstrapCoreObjectArrayOffsets(_UEVars.pGetNameByID, pOffsets, _UEVars.GUObjectsArrayPtr);
 
     _UEVars.ObjObjectsPtr = _UEVars.GUObjectsArrayPtr + pOffsets->FUObjectArray.ObjObjects;
 
@@ -779,24 +780,6 @@ UEVarsInitStatus IGameProfile::InitUEVars()
     _UEVars.StaticFindObject = GetStaticFindObject();
     _UEVars.NativeAndroidApp = GetNativeAndroidApp();
     UEWrappers::Init(GetUEVars());
-    // Do not report Probe success until at least one real UObject can be
-    // traversed with the selected layout.  This catches stale/incorrect
-    // overrides before SEARCH_CLASSES and DUMP consume them.
-    bool hasObjectSample = false;
-    if (auto *objects = UEWrappers::GetObjects())
-    {
-        const int32_t total = objects->GetNumElements();
-        const int32_t sampleLimit = std::min<int32_t>(total, 64);
-        for (int32_t i = 0; i < sampleLimit; ++i)
-        {
-            if (objects->GetObjectPtr(i)) { hasObjectSample = true; break; }
-        }
-    }
-    if (!hasObjectSample)
-    {
-        LOGE("[Bootstrap] object array layout validated but no readable UObject sample");
-        return UEVarsInitStatus::ERROR_INIT_OBJOBJECTS;
-    }
     _UEVars.ProcessEvent = GetProcessEvent();
 
     return UEVarsInitStatus::SUCCESS;
@@ -810,19 +793,6 @@ uint8_t *IGameProfile::GetNameEntry(int32_t id) const
     uintptr_t namesPtr = _UEVars.GetNamesPtr();
     if (namesPtr == 0)
         return nullptr;
-
-    // FNAME_OUTLINE_NUMBER：FName 是 Outline Number（含偏移），不是直接 Index。
-    // 真正的 NameIndex = id >> 18。此处解包，后续 FNamePool 查找使用真实 Index。
-    int32_t resolvedId = id;
-    if (IsUsingFNamePool() && isUsingOutlineNumberName())
-    {
-        static const int FNAME_OUTLINE_SHIFT = 18;
-        const int32_t extracted = id >> FNAME_OUTLINE_SHIFT;
-        if (extracted > 0 && extracted != id)
-        {
-            resolvedId = extracted;
-        }
-    }
 
     if (!IsUsingFNamePool())
     {
@@ -862,8 +832,8 @@ uint8_t *IGameProfile::GetNameEntry(int32_t id) const
     uintptr_t chunckMask = (1 << blockBit) - 1;
     uintptr_t stride = GetOffsets()->FNamePool.Stride;
 
-    uintptr_t block_offset = ((resolvedId >> blockBit) * sizeof(void *));
-    uintptr_t chunck_offset = ((resolvedId & chunckMask) * stride);
+    uintptr_t block_offset = ((id >> blockBit) * sizeof(void *));
+    uintptr_t chunck_offset = ((id & chunckMask) * stride);
 
     uint8_t *chunck = vm_rpm_ptr<uint8_t *>((void *)(namesPtr + blocks + block_offset));
     if (!chunck)
@@ -903,26 +873,9 @@ std::string IGameProfile::GetNameEntryString(uint8_t *entry) const
                         sizeof(int16_t)))
             return "";
 
-        // 自动识别 FNameEntryHeader 布局（保持 UE4.22-UE5 全兼容）：
-        //   UE4.22-4.25 : uint32 header, Len = header >> 6（GetLength 已自动识别）
-        //   UE4.26+     : uint16 header, Len = header >> 1
-        //   FNAME_OUTLINE_NUMBER（含腾讯魔改 UE4，如 LetsGo/元梦之星）：
-        //     Len==0 的 entry 是"外链"记录，布局为 Header(2)+NextEntryId(4)+Number(4)，
-        //     真实名字由 NextEntryId 指向。此前被 isUsingOutlineNumberName() 开关
-        //     挡住（UE4.25-4.27 档案硬编码 false），改为纯结构自动识别。
-        size_t tryLen = offsets->FNamePoolEntry.GetLength(header);
-        if (tryLen == 0 && (header >> 1) == 0)
+        if (isUsingOutlineNumberName() &&
+            offsets->FNamePoolEntry.GetLength(header) == 0)
         {
-            // 结构上确认这是 FNAME_OUTLINE_NUMBER 的外链 entry：
-            // 运行时把开关自愈置 true（仅 outline 模式的游戏才会走到这里，
-            // 4.26+ 非 outline 游戏不受影响），保证后续 UE_FName::GetName/
-            // GetNumber 不再误读 FName.Number（LetsGo 的 FName 仅 4 字节）。
-            if (!offsets->Config.isUsingOutlineNumberName)
-            {
-                offsets->Config.isUsingOutlineNumberName = true;
-                LOGI("[Bootstrap] FNamePool: detected FNAME_OUTLINE_NUMBER outlined entry, enabling outline-name mode");
-            }
-
             const uintptr_t stringOff =
                 offsets->FNamePoolEntry.Header + sizeof(int16_t);
             const uintptr_t entryIdOff = stringOff + ((stringOff == 6) * 2);
@@ -1101,18 +1054,12 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
     const uintptr_t namePrivateOff = off->UObject.NamePrivate;
     const uintptr_t numChunks = off->TUObjectArray.NumElementsPerChunk;
     const uintptr_t itemObj = off->FUObjectItem.Object;
-    const uintptr_t stableItemSize = (off->FUObjectItem.Size >= 0x18) ? off->FUObjectItem.Size : 0x18;
+
 
     static const uintptr_t kNameOffs[] = {0x18, 0x1c, 0x20, 0x24, 0x28,0x2c,0x30,0x34,0x38,0x3c,0x40,0x44,0x48,0x4c,0x50,0x54,0x58,0x5c,0x60,0x64,0x68,0x6c};
 
-    // Scan multiple early slots to avoid false-negative when slot 0 has garbage.
-    // FName pool stores the PLAIN package/class name, not the "/Script/"-prefixed
-    // path: LetsGo(UE4.26) slot0 = Package "CoreUObject" (FName "CoreUObject"),
-    // slot1 = Class CoreUObject.Object (FName "Object"). Accept both forms plus
-    // generic "Package"/"Class" so slot0-null and slot0-package layouts verify.
-    constexpr int kVerifySlots = 8;
-    static const char *const kVerifyAnchors[] = {"CoreUObject", "/Script/CoreUObject", "Object", "Package", "Class"};
-
+    // 候选验证只使用原始版本的强锚点 /Script/CoreUObject；
+    // 不接受普通引擎名，避免把 FNamePool 附近的普通数据误判为 GUObjectArray。
     // 双向扫描：GUObjectArray 可能在 namesScanBase 高地址或低地址方向，
     // 原实现只往高地址扫（namesScanBase + 8*i），低地址方向永远扫不到。
     static const int kMaxSearchDist = 0x300000;
@@ -1138,75 +1085,29 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
         if (firstObj < 0x10000 || !kPtrValidator.isPtrReadable(firstObj))
             return 0;
 
-        // 多槽位验证：扫描前 kVerifySlots 个对象，检查是否有有效锚点
-        // UE4.2x 的 slot 0 是保留空槽，真对象从 slot 1 开始
-        int anchorHits = 0;
-        for (int slot = 0; slot < kVerifySlots; ++slot)
+        // 必须沿用原始版本的强锚点规则：候选对象数组的第一个对象
+        // 必须直接解析为 /Script/CoreUObject。仅凭内存可读性或宽松短名
+        // 会把 FNamePool 附近的普通数据误判为 GUObjectArray。
+        for (uintptr_t no : kNameOffs)
         {
-            uintptr_t objAddr = 0;
-            if (numChunks > 0 && chunk0)
+            const int32_t id = vm_rpm_ptr<int32_t>((const void *)(firstObj + no));
+            if (id <= 0 || id > 0x200000)
+                continue;
+
+            const std::string nm = GetNameByID(id);
+            if (nm != "/Script/CoreUObject")
+                continue;
+
+            if (no != off->UObject.NamePrivate)
             {
-                const int32_t chunkIdx = slot / static_cast<int32_t>(numChunks);
-                const int32_t withinChunk = slot % static_cast<int32_t>(numChunks);
-                const uintptr_t chunkPtr = vm_rpm_ptr<uintptr_t>((void *)(objects + chunkIdx * sizeof(uintptr_t)));
-                if (chunkPtr && kPtrValidator.isPtrReadable(chunkPtr, sizeof(uintptr_t)))
-                    objAddr = vm_rpm_ptr<uintptr_t>((void *)(chunkPtr + withinChunk * stableItemSize + itemObj));
-            }
-            else
-            {
-                objAddr = vm_rpm_ptr<uintptr_t>((void *)(objects + slot * stableItemSize + itemObj));
+                LOGI("[Bootstrap] Adjusting UObject.NamePrivate 0x%lx -> 0x%lx",
+                     (unsigned long)off->UObject.NamePrivate, (unsigned long)no);
+                off->UObject.NamePrivate = no;
             }
 
-            if (objAddr < 0x10000 || !kPtrValidator.isPtrReadable(objAddr))
-                continue;  // 空槽，跳过
-
-            // 验证此对象的可读性（class + name）
-            if (off->UObject.ClassPrivate && off->UObject.NamePrivate)
-            {
-                const uintptr_t classPtr = vm_rpm_ptr<uintptr_t>((void *)(objAddr + off->UObject.ClassPrivate));
-                if (classPtr && kPtrValidator.isPtrReadable(classPtr, 0x20))
-                {
-                    for (uintptr_t no : kNameOffs)
-                    {
-                        const int32_t id = vm_rpm_ptr<int32_t>((const void *)(objAddr + no));
-                        if (id > 0)
-                        {
-                            const std::string nm = GetNameByID(id);
-                            bool matched = false;
-                            // Outline number 模式下 GetNameByID 可能返回 "CoreUObject_N"，
-                            // 去掉 _N 后缀后再与锚点比较。
-                            std::string nmClean = nm;
-                            if (nmClean.size() > 2 && nmClean.substr(nmClean.size() - 2) == "_N")
-                                nmClean.resize(nmClean.size() - 2);
-                            for (const char *anchor : kVerifyAnchors)
-                            {
-                                if (nmClean == anchor)
-                                {
-                                    matched = true;
-                                    break;
-                                }
-                            }
-                            if (matched)
-                            {
-                                ++anchorHits;
-                                if (no != namePrivateOff)
-                                {
-                                    LOGI("[Bootstrap] Adjusting UObject.NamePrivate 0x%lx -> 0x%lx",
-                                         (unsigned long)namePrivateOff, (unsigned long)no);
-                                    off->UObject.NamePrivate = no;
-                                }
-                                break;
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if (anchorHits > 0)
-        {
-            LOGI("[Bootstrap] GUObject @ 0x%lx (%s/Objects=0x%lx, anchorHits=%d, verified %d slots)",
-                 (unsigned long)candObjAddr, direction, (unsigned long)objects, anchorHits, kVerifySlots);
+            LOGI("[Bootstrap] GUObject @ 0x%lx (%s/Objects=0x%lx, FirstObj=0x%lx, anchor='/Script/CoreUObject')",
+                 (unsigned long)candObjAddr, direction, (unsigned long)objects,
+                 (unsigned long)firstObj);
             return candObjAddr;
         }
 
@@ -1217,7 +1118,7 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
         {
             ++sDiagCount;
             const int32_t id0 = (firstObj >= 0x10000)
-                ? vm_rpm_ptr<int32_t>((const void *)(firstObj + namePrivateOff)) : -1;
+                ? vm_rpm_ptr<int32_t>((const void *)(firstObj + off->UObject.NamePrivate)) : -1;
             const std::string s0 = (id0 > 0) ? GetNameByID(id0) : "";
             LOGI("[Bootstrap] verifyCandidate(mem-ok,name-fail): cand=0x%lx objects=0x%lx chunk0=0x%lx obj0=0x%lx id=%d name='%s'",
                  (unsigned long)candObjAddr, (unsigned long)objects,
@@ -1248,7 +1149,7 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
     LOGE("[Bootstrap] 通用方式搜索 GUObject 失败");
     LOGI("[Bootstrap] 诊断: NamesPtr=0x%lx, scanBase=0x%lx, nameOff=0x%lx, objObjectsOff=0x%lx",
          (unsigned long)namesPtr, (unsigned long)namesScanBase,
-         (unsigned long)namePrivateOff, (unsigned long)objObjectsOff);
+         (unsigned long)off->UObject.NamePrivate, (unsigned long)objObjectsOff);
     LOGI("[Bootstrap] 建议: 使用 SCAN_GNAMES 验证 NamesPtr，或使用 APPLY_PROBE_OVERRIDES 手动指定");
     return 0;
 }

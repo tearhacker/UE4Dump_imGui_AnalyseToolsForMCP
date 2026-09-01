@@ -1,0 +1,110 @@
+14,18c14,19
+<     const uint32_t _curGen = UEWrappers::GetInitGeneration();                                         \
+<     if (_cachedGen != _curGen)                                                                        \
+<     {                                                                                                 \
+<         obj = UEWrappers::GetObjects()->FindObject<UE_UClass>(NAME);                                  \
+<         _cachedGen = _curGen;                                                                         \
+---
+>     const uint32_t _curGen = UEWrappers::GetInitGeneration();                                         \
+>     if (_cachedGen != _curGen)                                                                        \
+>     {                                                                                                 \
+>         auto *objects = UEWrappers::GetObjects();                                                     \
+>         obj = objects ? objects->FindObject<UE_UClass>(NAME) : UE_UClass();                          \
+>         _cachedGen = _curGen;                                                                         \
+72,101c73,137
+< int32_t UE_UObjectArray::GetNumElements() const
+< {
+<     if (UEWrappers::GUVars->GetObjObjectsPtr() == 0)
+<         return 0;
+< 
+<     return vm_rpm_ptr<int32_t>((void *)(UEWrappers::GUVars->GetObjObjectsPtr() + UEWrappers::GetOffsets()->TUObjectArray.NumElements));
+< }
+< 
+< uint8_t *UE_UObjectArray::GetObjectPtr(int32_t id) const
+< {
+<     if (id < 0 || id >= GetNumElements() || !Objects)
+<         return nullptr;
+< 
+<     if (UEWrappers::GetOffsets()->TUObjectArray.NumElementsPerChunk <= 0)
+<     {
+<         return vm_rpm_ptr<uint8_t *>((void *)((uintptr_t)Objects + (id * UEWrappers::GetOffsets()->FUObjectItem.Size) + UEWrappers::GetOffsets()->FUObjectItem.Object));
+<     }
+< 
+<     const int32_t NumElementsPerChunk = UEWrappers::GetOffsets()->TUObjectArray.NumElementsPerChunk;
+<     const int32_t chunkIndex = id / NumElementsPerChunk;
+<     const int32_t withinChunkIndex = id % NumElementsPerChunk;
+< 
+<     // if (chunkIndex >= NumChunks) return nullptr;
+< 
+<     uint8_t *chunk = vm_rpm_ptr<uint8_t *>((void *)((uintptr_t)Objects + (static_cast<uintptr_t>(chunkIndex) * sizeof(void *))));
+<     if (!chunk)
+<         return nullptr;
+< 
+<     return vm_rpm_ptr<uint8_t *>(chunk + (withinChunkIndex * UEWrappers::GetOffsets()->FUObjectItem.Size) + UEWrappers::GetOffsets()->FUObjectItem.Object);
+< }
+---
+> int32_t UE_UObjectArray::GetNumElements() const
+> {
+>     if (!UEWrappers::GUVars || UEWrappers::GUVars->GetObjObjectsPtr() == 0 ||
+>         !UEWrappers::GetOffsets())
+>         return 0;
+> 
+>     const int32_t count = vm_rpm_ptr<int32_t>((void *)(UEWrappers::GUVars->GetObjObjectsPtr() +
+>         UEWrappers::GetOffsets()->TUObjectArray.NumElements));
+>     return (count >= 0 && count <= 5000000) ? count : 0;
+> }
+> 
+> uint8_t *UE_UObjectArray::GetObjectPtr(int32_t id) const
+> {
+>     if (id < 0 || id >= GetNumElements() || !Objects)
+>         return nullptr;
+> 
+>     const auto *offsets = UEWrappers::GetOffsets();
+>     if (!offsets || offsets->FUObjectItem.Size < sizeof(uintptr_t))
+>         return nullptr;
+> 
+>     auto validObject = [&](uint8_t *candidate) -> uint8_t *
+>     {
+>         if (!candidate || !kPtrValidator.isPtrReadable(candidate, 0x28))
+>             return nullptr;
+>         uintptr_t klass = 0;
+>         if (!vm_rpm_ptr(candidate + offsets->UObject.ClassPrivate, &klass, sizeof(klass)) ||
+>             !kPtrValidator.isPtrReadable(klass, 0x20))
+>             return nullptr;
+>         int32_t nameId = -1;
+>         if (!vm_rpm_ptr(candidate + offsets->UObject.NamePrivate, &nameId, sizeof(nameId)) ||
+>             nameId < 0 || nameId > 0x4000000)
+>             return nullptr;
+>         return candidate;
+>     };
+> 
+>     if (offsets->TUObjectArray.NumElementsPerChunk <= 0)
+>     {
+>         auto *candidate = vm_rpm_ptr<uint8_t *>((void *)((uintptr_t)Objects +
+>             (static_cast<uintptr_t>(id) * offsets->FUObjectItem.Size) + offsets->FUObjectItem.Object));
+>         return validObject(candidate);
+>     }
+> 
+>     const int32_t NumElementsPerChunk = offsets->TUObjectArray.NumElementsPerChunk;
+>     const int32_t chunkIndex = id / NumElementsPerChunk;
+>     const int32_t withinChunkIndex = id % NumElementsPerChunk;
+> 
+>     // Standard UE4 FChunkedFixedUObjectArray: Objects is a table of chunk pointers.
+>     uintptr_t chunkAddress = 0;
+>     if (vm_rpm_ptr((void *)((uintptr_t)Objects + static_cast<uintptr_t>(chunkIndex) * sizeof(void *)),
+>                    &chunkAddress, sizeof(chunkAddress)) &&
+>         kPtrValidator.isPtrReadable(chunkAddress, offsets->FUObjectItem.Size))
+>     {
+>         auto *candidate = vm_rpm_ptr<uint8_t *>((void *)(chunkAddress +
+>             (static_cast<uintptr_t>(withinChunkIndex) * offsets->FUObjectItem.Size) + offsets->FUObjectItem.Object));
+>         if (auto *object = validObject(candidate))
+>             return object;
+>     }
+> 
+>     // Some game builds expose the first chunk directly instead of a chunk table.
+>     // Keep this fallback guarded by the same UObject validation so code/data bytes
+>     // can never be reported as a valid object.
+>     auto *direct = vm_rpm_ptr<uint8_t *>((void *)((uintptr_t)Objects +
+>         (static_cast<uintptr_t>(id) * offsets->FUObjectItem.Size) + offsets->FUObjectItem.Object));
+>     return validObject(direct);
+> }

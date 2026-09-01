@@ -1,0 +1,49 @@
+14c14
+< enum class PATTERN_MAP_TYPE : int8_t
+---
+> enum class PATTERN_MAP_TYPE : int8_t
+23c23,48
+< };
+---
+> };
+> 
+> struct UEAddressOverrides
+> {
+>     uintptr_t namesPtr = 0;
+>     uintptr_t guObjectArrayPtr = 0;
+>     bool hasNamesPtr = false;
+>     bool hasGUObjectArrayPtr = false;
+>     bool hasNameLayout = false;
+>     bool hasObjectLayout = false;
+> 
+>     uintptr_t nameStride = 0;
+>     uintptr_t nameBlocksBit = 0;
+>     uintptr_t nameBlocksOff = 0;
+>     uintptr_t nameHeaderOff = 0;
+>     uintptr_t nameLengthShift = 0;
+>     uintptr_t objObjectsOff = 0;
+>     uintptr_t objectsOff = 0;
+>     uintptr_t numElementsOff = 0;
+>     uintptr_t numElementsPerChunk = 0;
+>     uintptr_t itemObjectOff = 0;
+>     uintptr_t itemSize = 0;
+>     uintptr_t classPrivateOff = 0;
+>     uintptr_t namePrivateOff = 0;
+>     uintptr_t outerPrivateOff = 0;
+> };
+28,29c53,57
+< protected:
+<     UEVars _UEVars;
+---
+> protected:
+>     UEVars _UEVars;
+>     UEAddressOverrides _addressOverrides;
+>     UE_Offsets _baseOffsetsBackup;
+>     bool _hasOffsetsBackup = false;
+34,35c62,64
+<     UEVarsInitStatus InitUEVars();
+<     const UEVars *GetUEVars() const { return &_UEVars; }
+---
+>     UEVarsInitStatus InitUEVars();
+>     const UEVars *GetUEVars() const { return &_UEVars; }
+>     void SetAddressOverrides(const UEAddressOverrides &overrides);

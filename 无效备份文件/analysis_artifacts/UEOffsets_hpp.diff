@@ -1,0 +1,5 @@
+311a312,315
+>     // setter —— APPLY_PROBE_OVERRIDES 注入运行时覆盖值时使用
+>     void SetNamesPtr(uintptr_t p) { NamesPtr = p; };
+>     void SetGUObjectsArrayPtr(uintptr_t p) { GUObjectsArrayPtr = p; };
+> 

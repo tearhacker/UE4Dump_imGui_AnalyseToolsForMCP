@@ -25,3 +25,15 @@
   可读（`isPtrReadable`），游戏常把 chunk 指针表放在 `.rodata`。误用 `isPtrWritable` 会静默
   丢弃有效候选，导致 "通用方式搜索 GUObject 失败"。
 - 验证槽位对象的内存可读性已有 `isPtrReadable(firstObj)` 兜底，不会被 bogus executable page 骗过。
+
+## SCAN_GNAMES LOW confidence 时应手动覆盖（2026-09-01 经验）
+
+- LetsGo（UE4.26 FNAME_OUTLINE_NUMBER）的 SCAN_GNAMES 全部 score=15 失败，原因是默认 layout
+  参数（stride=2, lengthShift=6）不适配 Outline Number 模式，锚点验证无法解码。
+- **解决方案**：直接使用 `SCAN_OBJECTS` 的高分候选地址 + `SCAN_GNAMES` 的最高分候选地址，
+  通过 `APPLY_PROBE_OVERRIDES` 手动指定，无需继续重试自动扫描。
+- 正确格式：
+  ```json
+  {"overrides": {"namesPtr": "0xADDR", "guObjectArrayPtr": "0xADDR"}}
+  ```
+- 成功探测后，后续 dump 流程可正常进行。
