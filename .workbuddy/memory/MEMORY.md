@@ -18,3 +18,10 @@
 - ⚠️ 已知前置编译阻塞（与本仓库 MCP 工作无关）：`executable.cpp:4268` 调
   `ANativeWindowCreator::ProcessMirrorDisplay()`，但 `ANativeWindowCreator.h` 工作树已删除该成员。
   属 mirror/virtual display 子系统，修复它不在 MCP 网络任务范围内。
+
+## GetGUObjectArrayPtr 陷阱（2026-09-01 修复记录）
+
+- **不要对只读数据用 `isPtrWritable`**：`TUObjectArray.Objects` 和 `ObjObjects_Objects` 只需
+  可读（`isPtrReadable`），游戏常把 chunk 指针表放在 `.rodata`。误用 `isPtrWritable` 会静默
+  丢弃有效候选，导致 "通用方式搜索 GUObject 失败"。
+- 验证槽位对象的内存可读性已有 `isPtrReadable(firstObj)` 兜底，不会被 bogus executable page 骗过。

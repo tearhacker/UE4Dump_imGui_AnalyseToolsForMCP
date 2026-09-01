@@ -113,6 +113,32 @@ attach，不依赖 Probe success。任何阶段都保留前面已找到的部分
 2. `getLogs` → 设备端日志，通常直接指出失败原因
 3. `getCapabilities` → 确认当前命令集（F 组依赖 ptrace）
 4. `listProcesses` → 确认目标进程仍存在
+
+## Probe 失败时的自动修复流程
+
+当 `startProbe` 返回 `ERROR_INIT_GUOBJECTARRAY` 或 `ERROR_INIT_GNAMES` 时：
+
+```
+1. getLogs(maxLines=100) → 查看诊断信息
+   - 看到 "通用方式搜索 GUObject 失败" + "诊断: NamesPtr=0x..." → GNames 有效但 GUObject 找不到
+   - 看到 "自动搜索 GNames/NamePool 失败" + "ELF基址=0x..." → GNames 也没找到
+   
+2. 尝试 SCAN_GNAMES → 手动扫描候选
+   scanGnames(source="AUTO", region="LOADABLE")
+   
+3. 如果 SCAN_GNAMES 返回候选 → 用 SAMPLE_GNAMES 验证
+   sampleGnames(sessionId="...", candidateId=0)
+   
+4. 如果验证成功 → APPLY_PROBE_OVERRIDES 覆盖
+   applyProbeOverrides(overrides={"namesPtr": "0x...", "guObjectArrayPtr": "0x..."})
+   
+5. 重新 startProbe → 使用覆盖值
+```
+
+常见失败场景：
+- **元梦之星/letsgo**: FName 池布局魔改，通用搜索可能失败 → 使用专用 profile
+- **和平精英/PUBG**: GNames 有额外间接引用 → 需要多跳扫描
+- **架构魔改游戏**: ELF 被加密或偏移表被修改 → 只能手工定位
 """
 
 

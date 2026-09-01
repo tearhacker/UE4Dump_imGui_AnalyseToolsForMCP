@@ -765,10 +765,7 @@ UEVarsInitStatus IGameProfile::InitUEVars()
     if (!vm_rpm_ptr((void *)(_UEVars.ObjObjectsPtr + pOffsets->TUObjectArray.Objects),
                     &_UEVars.ObjObjects_Objects, sizeof(uintptr_t)))
         return UEVarsInitStatus::ERROR_INIT_OBJOBJECTS;
-    // The object storage itself must be writable.  A readable executable
-    // mapping is commonly instruction bytes and was previously accepted as
-    // the Objects table, producing bogus pointers and an empty SDK dump.
-    if (!kPtrValidator.isPtrWritable(_UEVars.ObjObjects_Objects, sizeof(uintptr_t)))
+    if (!kPtrValidator.isPtrReadable(_UEVars.ObjObjects_Objects, sizeof(uintptr_t)))
         return UEVarsInitStatus::ERROR_INIT_OBJOBJECTS;
 
     LOGI("[Bootstrap] Runtime object array: GUObject=0x%lx ObjObjects=0x%lx Objects=0x%lx",
@@ -814,6 +811,19 @@ uint8_t *IGameProfile::GetNameEntry(int32_t id) const
     if (namesPtr == 0)
         return nullptr;
 
+    // FNAME_OUTLINE_NUMBER：FName 是 Outline Number（含偏移），不是直接 Index。
+    // 真正的 NameIndex = id >> 18。此处解包，后续 FNamePool 查找使用真实 Index。
+    int32_t resolvedId = id;
+    if (IsUsingFNamePool() && isUsingOutlineNumberName())
+    {
+        static const int FNAME_OUTLINE_SHIFT = 18;
+        const int32_t extracted = id >> FNAME_OUTLINE_SHIFT;
+        if (extracted > 0 && extracted != id)
+        {
+            resolvedId = extracted;
+        }
+    }
+
     if (!IsUsingFNamePool())
     {
         static uintptr_t gNames = 0;
@@ -852,8 +862,8 @@ uint8_t *IGameProfile::GetNameEntry(int32_t id) const
     uintptr_t chunckMask = (1 << blockBit) - 1;
     uintptr_t stride = GetOffsets()->FNamePool.Stride;
 
-    uintptr_t block_offset = ((id >> blockBit) * sizeof(void *));
-    uintptr_t chunck_offset = ((id & chunckMask) * stride);
+    uintptr_t block_offset = ((resolvedId >> blockBit) * sizeof(void *));
+    uintptr_t chunck_offset = ((resolvedId & chunckMask) * stride);
 
     uint8_t *chunck = vm_rpm_ptr<uint8_t *>((void *)(namesPtr + blocks + block_offset));
     if (!chunck)
@@ -1113,7 +1123,7 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
     auto verifyCandidate = [&](uintptr_t candObjAddr, const char* direction) -> uintptr_t
     {
         uintptr_t objects = vm_rpm_ptr<uintptr_t>((void *)(candObjAddr + objObjectsOff));
-        if (objects < 0x10000 || !kPtrValidator.isPtrWritable(objects, sizeof(uintptr_t)))
+        if (objects < 0x10000 || !kPtrValidator.isPtrReadable(objects, sizeof(uintptr_t)))
             return 0;
 
         uintptr_t firstObj = 0;
@@ -1121,7 +1131,7 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
         if (numChunks > 0)
         {
             chunk0 = vm_rpm_ptr<uintptr_t>((void *)objects);
-            if (kPtrValidator.isPtrWritable(chunk0, sizeof(uintptr_t)))
+            if (kPtrValidator.isPtrReadable(chunk0, sizeof(uintptr_t)))
                 firstObj = vm_rpm_ptr<uintptr_t>((void *)(chunk0 + itemObj));
         }
         else
@@ -1166,9 +1176,14 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
                         {
                             const std::string nm = GetNameByID(id);
                             bool matched = false;
+                            // Outline number 模式下 GetNameByID 可能返回 "CoreUObject_N"，
+                            // 去掉 _N 后缀后再与锚点比较。
+                            std::string nmClean = nm;
+                            if (nmClean.size() > 2 && nmClean.substr(nmClean.size() - 2) == "_N")
+                                nmClean.resize(nmClean.size() - 2);
                             for (const char *anchor : kVerifyAnchors)
                             {
-                                if (nm == anchor)
+                                if (nmClean == anchor)
                                 {
                                     matched = true;
                                     break;
@@ -1234,6 +1249,10 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
     }
 
     LOGE("[Bootstrap] 通用方式搜索 GUObject 失败");
+    LOGI("[Bootstrap] 诊断: NamesPtr=0x%lx, scanBase=0x%lx, nameOff=0x%lx, objObjectsOff=0x%lx",
+         (unsigned long)namesPtr, (unsigned long)namesScanBase,
+         (unsigned long)namePrivateOff, (unsigned long)objObjectsOff);
+    LOGI("[Bootstrap] 建议: 使用 SCAN_GNAMES 验证 NamesPtr，或使用 APPLY_PROBE_OVERRIDES 手动指定");
     return 0;
 }
 
@@ -1414,6 +1433,12 @@ uintptr_t IGameProfile::GetNamesPtr() const
     }
 
     LOGE("[Bootstrap] 自动搜索 GNames/NamePool 失败");
+    LOGI("[Bootstrap] 诊断: ELF基址=0x%lx, ELF大小=%zu, 可读段数=%zu",
+         (unsigned long)ue_elf.base(), 0, ue_elf.segments().size());
+    for (const auto &seg : ue_elf.segments())
+        LOGI("[Bootstrap]   段: base=0x%lx size=%zu readable=%d writable=%d",
+             (unsigned long)seg.startAddress, seg.length, seg.readable, seg.writeable);
+    LOGI("[Bootstrap] 建议: 使用 SCAN_GNAMES 命令手动扫描，或检查游戏是否修改了 ELF");
     return 0;
 }
 

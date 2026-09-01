@@ -179,6 +179,12 @@ void AutoFixProfile::DetectVersion() const
         _useFNamePool = true; _outlineNumber = true; break;
     default: break;
     }
+
+    // Tencent 魔改 UE4.26（LetsGo/元梦之星）在 UE4_25_27 家族里仍启用 FNAME_OUTLINE_NUMBER，
+    // 必须显式覆盖，否则 GetNameEntryString 不会跟 outline 链，直接拿 Outline Number 当
+    // FName Index 查表，返回垃圾字符串（如 "id=1392538734 name=''"）。
+    if (_packageHint == "com.tencent.letsgo" || _packageHint == "com.tencent.tmgp.yuanmeng")
+        _outlineNumber = true;
     _casePreserving = false;
 }
 
@@ -211,6 +217,11 @@ void AutoFixProfile::EnsureOffsetsInited() const
     default:
         _offsets = UE_DefaultOffsets::UE4_25_27(_casePreserving); break;
     }
+
+    // UE4_25_27() 工厂函数不接受 bFNAME_OUTLINE_NUMBER 参数，
+    // 所以对 LetsGo/元梦之星等腾讯魔改游戏，必须在工厂返回后显式覆盖 Config。
+    if (_outlineNumber)
+        _offsets.Config.isUsingOutlineNumberName = true;
 }
 
 UE_Offsets *AutoFixProfile::GetOffsets() const
