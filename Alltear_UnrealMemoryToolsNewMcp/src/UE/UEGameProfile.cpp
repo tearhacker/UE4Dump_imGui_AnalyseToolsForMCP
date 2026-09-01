@@ -1078,10 +1078,13 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
 
     static const uintptr_t kNameOffs[] = {0x18, 0x1c, 0x20, 0x24, 0x28,0x2c,0x30,0x34,0x38,0x3c,0x40,0x44,0x48,0x4c,0x50,0x54,0x58,0x5c,0x60,0x64,0x68,0x6c};
 
-    // UE4.2x reserves slot 0 (null), first valid object is at index 1 ("Object").
     // Scan multiple early slots to avoid false-negative when slot 0 has garbage.
+    // FName pool stores the PLAIN package/class name, not the "/Script/"-prefixed
+    // path: LetsGo(UE4.26) slot0 = Package "CoreUObject" (FName "CoreUObject"),
+    // slot1 = Class CoreUObject.Object (FName "Object"). Accept both forms plus
+    // generic "Package"/"Class" so slot0-null and slot0-package layouts verify.
     constexpr int kVerifySlots = 8;
-    static const char* kVerifyAnchor = "/Script/CoreUObject";
+    static const char *const kVerifyAnchors[] = {"CoreUObject", "/Script/CoreUObject", "Object", "Package", "Class"};
 
     // 双向扫描：GUObjectArray 可能在 namesScanBase 高地址或低地址方向，
     // 原实现只往高地址扫（namesScanBase + 8*i），低地址方向永远扫不到。
@@ -1142,7 +1145,16 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
                         if (id > 0 && id <= 0x200000)
                         {
                             const std::string nm = GetNameByID(id);
-                            if (nm == kVerifyAnchor)
+                            bool matched = false;
+                            for (const char *anchor : kVerifyAnchors)
+                            {
+                                if (nm == anchor)
+                                {
+                                    matched = true;
+                                    break;
+                                }
+                            }
+                            if (matched)
                             {
                                 ++anchorHits;
                                 if (no != namePrivateOff)
