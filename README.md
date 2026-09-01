@@ -250,6 +250,15 @@ python server.py
 
 ---
 
+## 🙏 致谢
+
+感谢以下作者对本项目的技术支持与贡献：
+
+- **[DreamFekk](https://github.com/DreamFekk)** — 项目核心研发与架构设计
+- **[ssyclr](https://github.com/ssyclr)** — 项目核心研发与工具链实现
+
+---
+
 *项目日期：2026-08-29 ~ 2026-09-01*
 *维护：泪心安卓领域基本盘技术*
 *当前主分支：`tearue4mcp`*

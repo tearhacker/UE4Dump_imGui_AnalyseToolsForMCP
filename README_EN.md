@@ -258,6 +258,15 @@ python server.py
 
 ---
 
+## 🙏 Acknowledgments
+
+Thanks to the following authors for their technical support and contributions to this project:
+
+- **[DreamFekk](https://github.com/DreamFekk)** — Core R&D and architecture design
+- **[ssyclr](https://github.com/ssyclr)** — Core R&D and toolchain implementation
+
+---
+
 *Project dates: 2026-08-29 ~ 2026-09-01*
 *Maintained by: 泪心安卓领域基本盘技术*
 *Current primary branch: `tearue4mcp`*
