@@ -6,6 +6,19 @@
 
 ---
 
+## 👋 About This Project & Contact
+
+This project is maintained by the **泪心 (TearGame)** team. Open source is not easy — coding late nights takes a toll. No expectations of reward, just hope to contribute to the open-source community together. Thank you all for your support!
+
+| Channel | Link / Info |
+|---------|-------------|
+| 💬 Discord | https://discord.gg/yghYHcEdD |
+| 🌐 Website | https://teargamestorem.top/ |
+| 📧 Email | tearhacker@outlook.com |
+| 🐧 QQ | 2254013571 |
+
+---
+
 ## 📌 In One Sentence
 
 Transform a mobile UE4 game injector into an **MCP server**, enabling AI LLMs to autonomously complete the full reverse-engineering loop — locate offsets → read memory → parse SDK → disassemble — without manual UI interaction.
