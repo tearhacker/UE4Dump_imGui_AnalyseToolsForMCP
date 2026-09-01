@@ -21,6 +21,29 @@ This project is maintained by the **泪心 (TearGame)** team. Open source is not
 
 ---
 
+## 🏆 Core Value: Documentation > Source Code
+
+> **This is what TearGame is open-sourcing for real.** The most valuable part is not the code — it's the engineering experience documented here.
+> Code is just an implementation vehicle; the docs record "how many pitfalls we walked into, how many detours we took." Without this context, rewriting the code would take weeks or months of trial and error.
+
+### What core problems do these docs solve?
+
+| Problem | Solution located in |
+|---------|---------------------|
+| **MCP tool call hangs / no response / can't determine next step** | `docs/mcp-protocol.md` §5-6 (heartbeat liveness check + long polling + `progress/etaSeconds` feedback) |
+| **Token budget explodes / frequent disconnects on memory reads** | `docs/泪心UE4_imGui_AnalyseToolsForMCp开发必读架构.md` §4.2 (per-tool response ≤4K token, output budget control) + `docs/MCP逆向分析UE4工具优化改造文档.md` (token compression strategies) |
+| **Agent amnesia / hallucination** | `docs/MCP逆向分析UE4引擎需补充能力.md` (auto profile → GNames/GUObjectArray locate → Dump → memory rebuild closed loop) + `docs/api/00-索引.md` (precise parameter contracts so LLM stops guessing) |
+| **Operit mobile + PC LAN connectivity without USB cable** | `docs/MCP网络配置三模式分析与改造方案.md` (three bind modes, direct connect without adb) |
+
+### Why docs > source code?
+
+1. **Source code is static**: breaks when any line changes; experience is version-agnostic
+2. **Source code doesn't explain "why"**: protocol design, token constraints, security trade-offs — all in the docs
+3. **Source code is ambiguous**: API behavior, boundary conditions — docs eliminate ambiguity with natural language
+4. **Source code doesn't record history**: Why is `NumElements` 0x10 not 0x14? Why disable `isPtrWritable`? — answered in `docs/先行开发修正文档手册.md` and `docs/UMT_改动代码文档.md`
+
+---
+
 ## 📌 In One Sentence
 
 Transform a mobile UE4 game injector into an **MCP server**, enabling AI LLMs to autonomously complete the full reverse-engineering loop — locate offsets → read memory → parse SDK → disassemble — without manual UI interaction.
@@ -151,20 +174,41 @@ python server.py
 
 ---
 
-## 📚 Documentation Reading Order
+## 📚 Documentation Reading Order (Priority Required)
 
-> Read in this order when onboarding. Do not skip.
+> **Warning**: Do **not** start writing code until you have read the documents below. Read first, code second — prevents redundant or ineffective development.
+> Read priority split into three tiers: 🔴 Mandatory → 🟡 Strongly recommended → 🟢 Reference as needed
 
-```
-1. overview.md              → High-level project overview
-2. 泪心UE4_imGui_AnalyseToolsForMCp功能说明.md   → What it does & why
-3. 泪心UE4_imGui_AnalyseToolsForMCp开发必读架构.md → How to write & conventions
-4. MCP可用工具文档.md       → 43~47 tool specs quick reference
-5. mcp-protocol.md         → Wire protocol between sides
-6. docs/api/00-索引.md     → Device-side 15-module API deep-dive index
-7. UMT_改动代码文档.md      → MCP vs original change log
-8. 先行开发修正文档手册.md   → Known issues & fix directions (2026-09-01)
-```
+### 🔴 Tier 1: Mandatory (must read before coding)
+
+| Order | Document | Why mandatory |
+|-------|----------|----------------|
+| 1 | `docs/mcp_server开发步骤.md` | Know how to start, config, and troubleshoot connections |
+| 2 | `docs/mcp-protocol.md` | The wire protocol is the single source of truth; any change must update doc first |
+| 3 | `docs/MCP开发路线图.md` | Understand current progress and next steps to avoid reinventing wheels |
+| 4 | `docs/MCP可用工具文档.md` | 43~47 tool specs; know each tool's input/output |
+| 5 | `docs/泪心UE4_MCP工具功能规格.md` | Functional spec for all tools; design rationale |
+
+### 🟡 Tier 2: Strongly Recommended (read before onboarding)
+
+| Order | Document | Why recommended |
+|-------|----------|-----------------|
+| 6 | `docs/overview.md` | High-level overview + maturity score + priority suggestions |
+| 7 | `docs/泪心UE4_imGui_AnalyseToolsForMCp功能说明.md` | What it does & why |
+| 8 | `docs/泪心UE4_imGui_AnalyseToolsForMCp开发必读架构.md` | How to write & conventions, token constraints |
+| 9 | `docs/UMT_改动代码文档.md` | MCP vs original changes |
+| 10 | `docs/api/00-索引.md` | Device-side 15-module API deep-dive index |
+
+### 🟢 Tier 3: Reference as Needed (look up when encountering issues)
+
+| Document | When to consult |
+|----------|-----------------|
+| `docs/先行开发修正文档手册.md` | When troubleshooting LetsGo/pubgmhd probe failures |
+| `docs/MCP逆向分析UE4工具优化改造文档.md` | When optimizing response token budget |
+| `docs/MCP逆向分析UE4引擎需补充能力.md` | When extending with new tools |
+| `docs/GhidraNative集成方案.md` | When enabling decompiler capability |
+| `docs/设备端命令服务设计.md` | When modifying CommandServer |
+| `docs/api/` per-module docs | When doing deep-dive on a specific module |
 
 ---
 
