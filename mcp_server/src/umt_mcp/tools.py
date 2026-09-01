@@ -88,9 +88,20 @@ def _dev(tool_name: str, timeout: float | None = None, **args: Any) -> str:
         data = br.call(cmd, payload, **kwargs)
     except proto.UmtExecutionError as exc:
         # 执行层失败 → isError tool result（协议 §5）：是设备端失败了，不是我调错了
+        # 自动附加最近设备端日志，帮助 AI 定位失败原因（无需主动调用 get_logs）
+        log_ctx = ""
+        try:
+            recent = br._logs  # peek，不消费
+            if recent:
+                log_ctx = "\n\n[设备端最近日志]\n" + "\n".join(
+                    l.get("msg", "") for l in list(recent)[-20:]
+                )
+        except Exception:
+            pass  # 不阻塞错误路径
         raise ToolError(
             f"设备端执行失败 [{exc.code}] {exc.msg}"
             + (f"\n详情: {json.dumps(exc.detail, ensure_ascii=False)}" if exc.detail else "")
+            + log_ctx
         ) from exc
     except proto.UmtProtocolError as exc:
         # 协议层错误。规范说应转 JSON-RPC error，但 FastMCP 抛非 ToolError 异常

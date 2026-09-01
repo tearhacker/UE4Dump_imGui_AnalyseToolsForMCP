@@ -937,10 +937,7 @@ std::string IGameProfile::GetNameEntryString(uint8_t *entry) const
                 return "";
         }
 
-        strLen = offsets->FNamePoolEntry.GetLength(header);
-        if (strLen == 0)
-            strLen = static_cast<size_t>(header >> 1);  // 16 位 header 兜底
-        strLen = std::min<size_t>(strLen, kMAX_UENAME_BUFFER);
+        strLen = std::min<size_t>(offsets->FNamePoolEntry.GetLength(header), kMAX_UENAME_BUFFER);
         if (strLen <= 0)
             return "";
 
@@ -1172,7 +1169,7 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
                     for (uintptr_t no : kNameOffs)
                     {
                         const int32_t id = vm_rpm_ptr<int32_t>((const void *)(objAddr + no));
-                        if (id > 0 && id <= 0x200000)
+                        if (id > 0)
                         {
                             const std::string nm = GetNameByID(id);
                             bool matched = false;
@@ -1221,7 +1218,7 @@ uintptr_t IGameProfile::GetGUObjectArrayPtr() const
             ++sDiagCount;
             const int32_t id0 = (firstObj >= 0x10000)
                 ? vm_rpm_ptr<int32_t>((const void *)(firstObj + namePrivateOff)) : -1;
-            const std::string s0 = (id0 > 0 && id0 <= 0x200000) ? GetNameByID(id0) : "";
+            const std::string s0 = (id0 > 0) ? GetNameByID(id0) : "";
             LOGI("[Bootstrap] verifyCandidate(mem-ok,name-fail): cand=0x%lx objects=0x%lx chunk0=0x%lx obj0=0x%lx id=%d name='%s'",
                  (unsigned long)candObjAddr, (unsigned long)objects,
                  (unsigned long)chunk0, (unsigned long)firstObj, id0, s0.c_str());
